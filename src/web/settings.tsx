@@ -1,6 +1,7 @@
 import { render } from "preact";
 import { useState } from "preact/hooks";
 import { clone, getApi } from "./api";
+import { Dropdown } from "./dropdown";
 
 const api = getApi();
 
@@ -13,13 +14,13 @@ const THINKING: [string, string][] = [
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: any }) {
   return (
-    <label class="field">
+    <div class="field">
       <span class="label">{label}</span>
       <div class="control">
         {children}
         {hint && <div class="hint">{hint}</div>}
       </div>
-    </label>
+    </div>
   );
 }
 
@@ -82,27 +83,13 @@ function App() {
           <input value={s.baseUrl} onInput={(e) => set("baseUrl", (e.target as HTMLInputElement).value)} />
         </Field>
         <Field label="默认对话模型">
-          <select value={s.model} onChange={(e) => set("model", (e.target as HTMLSelectElement).value)}>
-            {models.map((m) => (
-              <option value={m.id}>
-                {m.name} ({m.id})
-              </option>
-            ))}
-          </select>
+          <Dropdown value={s.model} onChange={(v) => set("model", v)} options={models.map((m) => ({ value: m.id, label: m.name, note: m.id }))} />
         </Field>
         <Field label="默认思考强度" hint="新会话使用；每个会话可在输入框下方单独切换">
-          <select value={s.thinkingLevel} onChange={(e) => set("thinkingLevel", (e.target as HTMLSelectElement).value)}>
-            {THINKING.map(([v, l]) => (
-              <option value={v}>{l}</option>
-            ))}
-          </select>
+          <Dropdown value={s.thinkingLevel} onChange={(v) => set("thinkingLevel", v)} options={THINKING.map(([v, l]) => ({ value: v, label: l }))} />
         </Field>
         <Field label="翻译 / 结论模型" hint="用于划词翻译与自动生成会话结论（不开启思考，速度优先）">
-          <select value={s.quickModel} onChange={(e) => set("quickModel", (e.target as HTMLSelectElement).value)}>
-            {models.map((m) => (
-              <option value={m.id}>{m.name}</option>
-            ))}
-          </select>
+          <Dropdown value={s.quickModel} onChange={(v) => set("quickModel", v)} options={models.map((m) => ({ value: m.id, label: m.name, note: m.id }))} />
         </Field>
         <Field label="额外模型 ID" hint="逗号分隔，用于 DeepSeek 新发布、pi 尚未内置的模型">
           <input value={s.extraModels} placeholder="例如 deepseek-v4-flash" onInput={(e) => set("extraModels", (e.target as HTMLInputElement).value)} />
@@ -150,33 +137,40 @@ function App() {
           <input type="checkbox" checked={s.outlineVisible} onChange={(e) => set("outlineVisible", (e.target as HTMLInputElement).checked)} />
         </Field>
         <Field label="脉络思考强度" hint="默认「中」；模型不支持的强度会改用较低一档（DeepSeek Flash 只有 低 / 高 / 最大，「中」按「低」运行）。强度越高结构越好，但出结果越慢">
-          <select value={s.outlineThinking} onChange={(e) => set("outlineThinking", (e.target as HTMLSelectElement).value)}>
-            <option value="off">关闭</option>
-            <option value="low">低</option>
-            <option value="medium">中（默认）</option>
-            <option value="high">高</option>
-          </select>
+          <Dropdown
+            value={s.outlineThinking}
+            onChange={(v) => set("outlineThinking", v)}
+            options={[
+              { value: "off", label: "关闭" },
+              { value: "low", label: "低" },
+              { value: "medium", label: "中（默认）" },
+              { value: "high", label: "高" },
+            ]}
+          />
         </Field>
         <Field label="脉络分析模型" hint="默认使用「翻译 / 结论模型」">
-          <select value={s.outlineModel} onChange={(e) => set("outlineModel", (e.target as HTMLSelectElement).value)}>
-            <option value="">与翻译 / 结论模型相同</option>
-            {models.map((m) => (
-              <option value={m.id}>{m.name}</option>
-            ))}
-          </select>
+          <Dropdown
+            value={s.outlineModel}
+            onChange={(v) => set("outlineModel", v)}
+            options={[{ value: "", label: "与翻译 / 结论模型相同" }, ...models.map((m) => ({ value: m.id, label: m.name, note: m.id }))]}
+          />
         </Field>
       </section>
 
       <section>
         <h2>网络搜索</h2>
         <Field label="搜索引擎" hint="DeepSeek 搜索使用同一个 API Key，按次计费（约 $0.75 / 千次成功请求）；失败时自动回退到 DuckDuckGo">
-          <select value={s.searchEngine} onChange={(e) => set("searchEngine", (e.target as HTMLSelectElement).value)}>
-            <option value="deepseek">DeepSeek 搜索（推荐）</option>
-            <option value="duckduckgo">DuckDuckGo（免费）</option>
-            <option value="tavily">Tavily</option>
-            <option value="brave">Brave Search</option>
-            <option value="searxng">SearXNG（自建）</option>
-          </select>
+          <Dropdown
+            value={s.searchEngine}
+            onChange={(v) => set("searchEngine", v)}
+            options={[
+              { value: "deepseek", label: "DeepSeek 搜索（推荐）" },
+              { value: "duckduckgo", label: "DuckDuckGo（免费）" },
+              { value: "tavily", label: "Tavily" },
+              { value: "brave", label: "Brave Search" },
+              { value: "searxng", label: "SearXNG（自建）" },
+            ]}
+          />
         </Field>
         {s.searchEngine === "tavily" && (
           <Field label="Tavily API Key">
@@ -194,10 +188,14 @@ function App() {
           </Field>
         )}
         <Field label="网页读取" hint="DeepSeek Fetch 返回整理后的 Markdown（按次计费）；本地抓取免费但对动态网页效果较差">
-          <select value={s.fetchEngine} onChange={(e) => set("fetchEngine", (e.target as HTMLSelectElement).value)}>
-            <option value="deepseek">DeepSeek Fetch（失败时回退本地）</option>
-            <option value="local">本地抓取</option>
-          </select>
+          <Dropdown
+            value={s.fetchEngine}
+            onChange={(v) => set("fetchEngine", v)}
+            options={[
+              { value: "deepseek", label: "DeepSeek Fetch（失败时回退本地）" },
+              { value: "local", label: "本地抓取" },
+            ]}
+          />
         </Field>
       </section>
 
@@ -217,10 +215,14 @@ function App() {
         {actions.map((a, i) => (
           <div class="action">
             <input class="a-label" value={a.label} onInput={(e) => setAction(i, { label: (e.target as HTMLInputElement).value })} />
-            <select value={a.mode} onChange={(e) => setAction(i, { mode: (e.target as HTMLSelectElement).value })}>
-              <option value="agent">Agent</option>
-              <option value="translate">翻译</option>
-            </select>
+            <Dropdown
+              value={a.mode}
+              onChange={(v) => setAction(i, { mode: v })}
+              options={[
+                { value: "agent", label: "Agent" },
+                { value: "translate", label: "翻译" },
+              ]}
+            />
             <textarea rows={2} disabled={a.mode === "translate"} value={a.prompt} placeholder={a.mode === "translate" ? "（翻译无需提示词）" : "提示词，包含 {text}"} onInput={(e) => setAction(i, { prompt: (e.target as HTMLTextAreaElement).value })} />
             <button onClick={() => set("quickActions", actions.filter((_, j) => j !== i))}>删除</button>
           </div>

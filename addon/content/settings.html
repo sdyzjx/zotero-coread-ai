@@ -33,6 +33,23 @@
       .action { display: grid; grid-template-columns: 110px 90px 1fr auto; gap: 6px; align-items: start; margin: 8px 0; }
       footer { position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: 12px; padding: 10px 24px; border-top: 1px solid var(--border); background: var(--bg2); }
       .ok { color: #2e7d32; } .err { color: #c62828; max-width: 70%; overflow-wrap: anywhere; }
+      /* self-drawn dropdown (native <select> popups misrender in this dialog window) */
+      .dd { position: relative; width: 100%; }
+      .dd-btn { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: var(--bg); padding: 5px 8px; }
+      .dd-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+      .dd.open .dd-btn { border-color: var(--accent); }
+      .dd-value { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .dd-ph { color: var(--muted); }
+      .dd-note { flex: 0 1 auto; color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
+      .dd-chev { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+      .dd-list { position: absolute; z-index: 50; left: 0; right: 0; top: calc(100% + 3px); max-height: 280px; overflow-y: auto; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+      .dd-list.up { top: auto; bottom: calc(100% + 3px); }
+      .dd-group { padding: 6px 8px 2px; color: var(--muted); font-size: 11px; font-weight: 600; }
+      .dd-opt { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 5px; cursor: default; }
+      .dd-opt .dd-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dd-opt.active { background: var(--bg2); }
+      .dd-opt.selected .dd-label { color: var(--accent); font-weight: 600; }
+      .dd-opt.disabled { opacity: .5; }
     </style>
   </head>
   <body>
