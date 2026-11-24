@@ -1,0 +1,12 @@
+// Website for CoRead AI: https://coread.doosam.uk
+// Build with `npm run site`, deploy with `npm run deploy:site`.
+{
+  "name": "coread-ai-site",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./build/site",
+    "not_found_handling": "404-page"
+  },
+  "workers_dev": false,
+  "routes": [{ "pattern": "coread.doosam.uk", "custom_domain": true }]
+}
