@@ -176,6 +176,7 @@ export class OutlineGutter {
   /** Zotero reader popups (annotation / selection / citation …) in main-window coordinates. */
   private popupBoxes: Box[] = [];
   private popupSig = "";
+  private holeSig = "";
   private readerObs: { doc: any; mo: any } | null = null;
   private popupRaf = 0;
   private pop!: HTMLElement;
@@ -1351,9 +1352,10 @@ export class OutlineGutter {
   }
 
   /**
-   * Our layers sit above the reader, so they would cover its popups: when a popup overlaps the
-   * navigator (or its tab / our action bar) those fade out and stop taking clicks, and the
-   * page marks leave a hole where the popup is.
+   * Our layers sit above the reader, so they would cover its popups. Instead of hiding, the
+   * navigator (and its tab, resize handle, our action bar) gets a hole cut where a popup is:
+   * the popup appears in front of it and receives the clicks, the rest stays usable. Page
+   * marks leave a hole there too.
    */
   private updatePopups(): void {
     const boxes: Box[] = [];
@@ -1372,16 +1374,14 @@ export class OutlineGutter {
       // reader closing
     }
     const sig = boxes.map((b) => `${Math.round(b.left)},${Math.round(b.top)},${Math.round(b.right)},${Math.round(b.bottom)}`).join(";");
-    if (sig === this.popupSig) return;
+    // Our own elements move / resize too, so their geometry is part of the check
+    const els = [this.gutter, this.resizer, this.pill, this.pop];
+    const elSig = els.map((el) => (el.hidden ? "-" : rectSig(el.getBoundingClientRect()))).join(";");
+    if (sig === this.popupSig && elSig === this.holeSig) return;
     this.popupSig = sig;
+    this.holeSig = elSig;
     this.popupBoxes = boxes;
-    const overlaps = (el: HTMLElement) => {
-      if (el.hidden) return false;
-      const r = el.getBoundingClientRect();
-      return boxes.some((b) => b.left < r.right && b.right > r.left && b.top < r.bottom && b.bottom > r.top);
-    };
-    this.root.classList.toggle("zpo-yield", boxes.length > 0 && (overlaps(this.gutter) || overlaps(this.pill) || overlaps(this.resizer)));
-    this.pop.classList.toggle("zpo-yield-pop", boxes.length > 0 && overlaps(this.pop));
+    for (const el of els) cutHoles(el, el.hidden ? [] : boxes);
   }
 
   /** Cut the reader popups out of a mask (white = draw, black = hole). */
@@ -1632,6 +1632,35 @@ export class OutlineGutter {
     this.root.remove();
     this.doc.getElementById("zoteropi-outline-css")?.remove();
   }
+}
+
+function rectSig(r: DOMRect): string {
+  return `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)},${Math.round(r.height)}`;
+}
+
+/**
+ * Clip holes into an element where reader popups overlap it (evenodd path), so the popup shows
+ * in front and clicks there fall through to it. Removes the clip when nothing overlaps.
+ */
+function cutHoles(el: HTMLElement, boxes: Box[]): void {
+  const r = el.getBoundingClientRect();
+  const pad = 6; // leave room for the popup's shadow
+  const holes = boxes
+    .map((b) => ({
+      x: Math.max(0, b.left - pad - r.left),
+      y: Math.max(0, b.top - pad - r.top),
+      x2: Math.min(r.width, b.right + pad - r.left),
+      y2: Math.min(r.height, b.bottom + pad - r.top),
+    }))
+    .filter((h) => h.x2 > h.x && h.y2 > h.y);
+  if (!holes.length) {
+    if (el.style.clipPath) el.style.clipPath = "";
+    return;
+  }
+  const f = (n: number) => Math.round(n * 10) / 10;
+  let d = `M0 0 H${f(r.width)} V${f(r.height)} H0 Z`;
+  for (const h of holes) d += ` M${f(h.x)} ${f(h.y)} H${f(h.x2)} V${f(h.y2)} H${f(h.x)} Z`;
+  el.style.clipPath = `path(evenodd, "${d}")`;
 }
 
 /** Intersection area over the smaller box's area (rects in PDF space). */

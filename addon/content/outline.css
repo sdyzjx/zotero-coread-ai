@@ -36,16 +36,6 @@
   display: none !important;
 }
 
-/* A Zotero reader popup overlaps us: get out of its way until it closes */
-.zpo-root.zpo-yield .zpo-gutter,
-.zpo-root.zpo-yield .zpo-resizer,
-.zpo-root.zpo-yield .zpo-pill,
-.zpo-pop.zpo-yield-pop {
-  opacity: 0 !important;
-  pointer-events: none !important;
-  transition: opacity 0.12s ease;
-}
-
 /* ---------------------------------------------------------------- container */
 .zpo-gutter {
   position: fixed;
