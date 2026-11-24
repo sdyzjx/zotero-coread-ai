@@ -267,7 +267,7 @@ export class CliAgentEngine {
       if (provider === "agy") {
         if (!CliAgentEngine.agyChecked) {
           const status = await agyPluginStatus().catch(() => null);
-          if (status && !status.installed) throw new Error("Antigravity 还没有安装 Zotero 工具插件：请在 Pi Agent 设置 →「模型来源」中点「安装插件」。");
+          if (status && !status.installed) throw new Error("Antigravity 还没有安装 Zotero 工具插件：请在 CoRead AI 设置 →「模型来源」中点「安装插件」。");
           CliAgentEngine.agyChecked = !!status?.installed;
         }
         spec.mcpUrl = mcpUrl(agyToken());

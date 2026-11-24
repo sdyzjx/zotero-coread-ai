@@ -1,0 +1,8 @@
+/download/*
+  Content-Type: application/octet-stream
+  Content-Disposition: attachment
+  Cache-Control: public, max-age=300
+
+/updates.json
+  Content-Type: application/json; charset=utf-8
+  Cache-Control: public, max-age=300

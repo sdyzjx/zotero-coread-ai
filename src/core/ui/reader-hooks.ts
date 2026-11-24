@@ -5,6 +5,7 @@
 import { getSettings, type QuickAction } from "../config";
 import { waive } from "../reader-utils";
 import type { Selection } from "../quick";
+import { BRAND, BRAND_ZH, logoMark } from "./mark";
 
 export interface ReaderHookHost {
   pluginID: string;
@@ -46,8 +47,9 @@ export function registerReaderHooks(host: ReaderHookHost): void {
         "display:flex;flex-wrap:wrap;gap:4px;padding:4px 2px 2px;border-top:1px solid rgba(127,127,127,.25);margin-top:2px;max-width:280px;",
       );
       const label = doc.createElement("span");
-      label.textContent = "π";
-      label.setAttribute("style", "font-weight:700;color:#6d5bd0;align-self:center;padding:0 4px;");
+      label.title = BRAND;
+      label.append(logoMark(doc, 15));
+      label.setAttribute("style", "display:inline-flex;color:#6d5bd0;align-self:center;padding:0 4px;");
       row.append(label);
       const add = (text: string, title: string, fn: () => void) => {
         const b = doc.createElement("button");
@@ -91,7 +93,7 @@ export function registerReaderHooks(host: ReaderHookHost): void {
       const imageKey = keys.find((k) => Zotero.Items.getByLibraryAndKey(libraryID, k)?.annotationType === "image");
       if (!imageKey) return;
       append({
-        label: "π 问 AI（这张图）",
+        label: `${BRAND_ZH} · 问 AI（这张图）`,
         onCommand: () => host.askImageAnnotation(reader, imageKey),
       });
     },
@@ -104,21 +106,21 @@ const TOOLBAR_CLASS = "zoteropi-toolbar";
 function buildToolbarButtons(doc: any, host: ReaderHookHost, reader: any): any {
   const b = doc.createElement("button");
   b.className = "toolbar-button";
-  b.title = "Pi Agent 聊天面板 (⌘/Ctrl+Shift+L)";
-  b.textContent = "π";
-  b.setAttribute("style", "font-weight:700;font-size:15px;color:#6d5bd0;width:auto;padding:0 6px;");
+  b.title = `${BRAND} 聊天面板 (⌘/Ctrl+Shift+L)`;
+  b.append(logoMark(doc, 17));
+  b.setAttribute("style", "display:inline-flex;align-items:center;color:#6d5bd0;width:auto;padding:0 6px;");
   b.addEventListener("click", () => host.togglePanel());
   const r = doc.createElement("button");
   r.className = "toolbar-button";
   r.title = "框图提问：框选图表 / 公式 / 表格向 AI 提问 (⌘/Ctrl+Shift+K)";
-  r.textContent = "π⬚";
-  r.setAttribute("style", "font-weight:700;font-size:13px;color:#6d5bd0;width:auto;padding:0 6px;");
+  r.append(logoMark(doc, 14), doc.createTextNode("⬚"));
+  r.setAttribute("style", "display:inline-flex;align-items:center;gap:1px;font-weight:700;font-size:13px;color:#6d5bd0;width:auto;padding:0 6px;");
   r.addEventListener("click", () => host.startRegionAsk(reader));
   const o = doc.createElement("button");
   o.className = "toolbar-button";
   o.title = "文章脉络：在左侧空白处显示 / 隐藏论文结构";
-  o.textContent = "π≡";
-  o.setAttribute("style", "font-weight:700;font-size:13px;color:#6d5bd0;width:auto;padding:0 6px;");
+  o.append(logoMark(doc, 14), doc.createTextNode("≡"));
+  o.setAttribute("style", "display:inline-flex;align-items:center;gap:1px;font-weight:700;font-size:13px;color:#6d5bd0;width:auto;padding:0 6px;");
   o.addEventListener("click", () => host.toggleOutline());
   const wrap = doc.createElement("div");
   wrap.className = TOOLBAR_CLASS;

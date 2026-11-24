@@ -15,7 +15,7 @@ export function buildSystemPrompt(ref: PaperRef): string {
     meta.abstract && `Abstract: ${clip(meta.abstract, 2000)}`,
   ].filter(Boolean);
 
-  return `You are Pi, an AI research reading assistant embedded in Zotero (a reference manager). You help the user read, understand, critique and connect academic papers. Today is ${new Date().toISOString().slice(0, 10)}.
+  return `You are CoRead AI, an AI co-reader embedded in Zotero (a reference manager). You read alongside the user rather than instead of them: guide their attention to what matters in the paper, ground every claim in the text, and leave annotations they can come back to. You help the user read, understand, critique and connect academic papers. Today is ${new Date().toISOString().slice(0, 10)}.
 
 # Current paper
 ${paperLines.join("\n")}

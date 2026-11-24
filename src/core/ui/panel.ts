@@ -5,6 +5,7 @@
  */
 import { getPref, setPref } from "../config";
 import { clamp, ensureStylesheet, h } from "./dom";
+import { BRAND, BRAND_ZH, logoMark } from "./mark";
 
 type Mode = "floating" | "left" | "right";
 
@@ -87,7 +88,7 @@ export class ChatPanel {
     ensureStylesheet(doc);
     this.root = h(doc, "div", { id: "zoteropi-root", class: "zp-root" });
 
-    this.titleEl = h(doc, "span", { class: "zp-title", text: "Pi Agent" });
+    this.titleEl = h(doc, "span", { class: "zp-title", text: BRAND });
     const btn = (label: string, title: string, fn: () => void, extra: Record<string, string> = {}) => {
       const b = h(doc, "button", { class: "zp-btn", title, text: label, ...extra });
       b.addEventListener("click", (e) => {
@@ -98,7 +99,7 @@ export class ChatPanel {
       return b;
     };
     const header = h(doc, "div", { class: "zp-header" }, [
-      h(doc, "span", { class: "zp-logo", text: "π" }),
+      h(doc, "span", { class: "zp-logo", title: BRAND }, [logoMark(doc, 12)]),
       this.titleEl,
       btn("⇤", "停靠到左侧", () => this.dock("left"), { "data-act": "left" }),
       btn("❐", "浮动窗口", () => this.dock("floating"), { "data-act": "floating" }),
@@ -118,10 +119,10 @@ export class ChatPanel {
       this.panel.append(rh);
     }
 
-    this.bubble = h(doc, "div", { class: "zp-bubble", title: "展开 Pi Agent（可拖动）", text: "π" });
+    this.bubble = h(doc, "div", { class: "zp-bubble", title: `展开 ${BRAND}（可拖动）` }, [logoMark(doc, 22)]);
     this.bubble.addEventListener("pointerdown", (e) => this.startBubbleDrag(e as PointerEvent));
 
-    this.tab = h(doc, "div", { class: "zp-tab", title: "展开 Pi Agent", text: "π Agent" });
+    this.tab = h(doc, "div", { class: "zp-tab", title: `展开 ${BRAND}` }, [logoMark(doc, 13), doc.createTextNode(" " + BRAND_ZH)]);
     this.tab.addEventListener("click", () => this.setCollapsed(false));
 
     this.snap = h(doc, "div", { class: "zp-snap", hidden: "true" });
@@ -205,7 +206,7 @@ export class ChatPanel {
   // ---------------------------------------------------------------- public
 
   setTitle(title: string): void {
-    this.titleEl.textContent = title || "Pi Agent";
+    this.titleEl.textContent = title || BRAND;
     this.titleEl.setAttribute("title", title || "");
   }
 

@@ -234,7 +234,7 @@ export async function writeAgyPlugin(mcpUrl: string, version: string): Promise<s
         $schema: "https://antigravity.google/schemas/v1/plugin.json",
         name: AGY_PLUGIN_NAME,
         version,
-        description: "Zotero Pi Agent: paper, annotation and library tools served by Zotero (only active while Zotero runs an agy turn).",
+        description: "CoRead AI for Zotero: paper, annotation and library tools served by Zotero (only active while Zotero runs an agy turn).",
       },
       null,
       2,

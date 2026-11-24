@@ -21,6 +21,7 @@ import { injectToolbarIntoOpenReaders, registerReaderHooks, removeToolbarFromRea
 import { registerDevEndpoint, unregisterDevEndpoint } from "./dev";
 import { registerMcpEndpoint, unregisterMcpEndpoint } from "./mcp/bridge";
 import { selectRegion } from "./ui/region-select";
+import { BRAND, BRAND_ZH } from "./ui/mark";
 import { renderRegion, type RenderedRegion } from "./vision";
 import { findReader } from "./reader-utils";
 
@@ -62,7 +63,7 @@ class ZoteroPiAddon {
       await Zotero.PreferencePanes.register({
         pluginID: this.pluginID,
         src: rootURI + "content/prefs.xhtml",
-        label: "Pi Agent",
+        label: BRAND,
         image: rootURI + "content/icons/icon.svg",
       });
     } catch (e) {
@@ -70,7 +71,7 @@ class ZoteroPiAddon {
     }
     this.context.start();
     this.unsubs.push(
-      this.context.changes.on((ctx) => this.panel?.setTitle(ctx ? ctx.title : "Pi Agent")),
+      this.context.changes.on((ctx) => this.panel?.setTitle(ctx ? ctx.title : BRAND)),
       this.quick.changes.on((job) => {
         if (!job) this.card?.close();
       }),
@@ -85,7 +86,7 @@ class ZoteroPiAddon {
     this.win = win;
     installPolyfills(win); // fills anything still missing if no other source window existed
     this.panel = new ChatPanel(win);
-    this.panel.setTitle(this.context.get()?.title || "Pi Agent");
+    this.panel.setTitle(this.context.get()?.title || BRAND);
     this.card = new QuickCard(
       win,
       () => this.quick.cancel(),
@@ -126,13 +127,13 @@ class ZoteroPiAddon {
     if (!popup) return;
     const sep = win.document.createXULElement("menuseparator");
     const toggle = win.document.createXULElement("menuitem");
-    toggle.setAttribute("label", "Pi Agent 聊天面板");
+    toggle.setAttribute("label", `${BRAND} 聊天面板`);
     toggle.addEventListener("command", () => this.togglePanel());
     const outline = win.document.createXULElement("menuitem");
-    outline.setAttribute("label", "Pi Agent 文章脉络");
+    outline.setAttribute("label", `${BRAND} 文章脉络`);
     outline.addEventListener("command", () => this.toggleOutline());
     const settings = win.document.createXULElement("menuitem");
-    settings.setAttribute("label", "Pi Agent 设置…");
+    settings.setAttribute("label", `${BRAND} 设置…`);
     settings.addEventListener("command", () => this.openSettings());
     popup.append(sep, toggle, outline, settings);
     this.menuItems = [sep, toggle, outline, settings];
@@ -257,7 +258,7 @@ class ZoteroPiAddon {
       const sel = await selectRegion(this.win, reader);
       if (!sel) return;
       const img = await renderRegion(reader, sel.pageIndex, sel.rect);
-      this.card?.open("框图提问 · π", { left: sel.screen.left, top: sel.screen.top, bottom: sel.screen.bottom });
+      this.card?.open(`框图提问 · ${BRAND_ZH}`, { left: sel.screen.left, top: sel.screen.top, bottom: sel.screen.bottom });
       this.quick.startImage(reader.itemID, img);
     } catch (e) {
       Zotero.logError(e);
@@ -271,7 +272,7 @@ class ZoteroPiAddon {
     try {
       const pos = JSON.parse(ann.annotationPosition);
       const img = await renderRegion(reader, pos.pageIndex, pos.rects?.[0]);
-      this.card?.open("图片批注 · π", null);
+      this.card?.open(`图片批注 · ${BRAND_ZH}`, null);
       this.quick.startImage(reader.itemID, img, key);
     } catch (e) {
       Zotero.logError(e);
@@ -297,7 +298,7 @@ class ZoteroPiAddon {
     const a = action === "ask" ? ({ id: "ask", label: "问 AI", mode: "ask", prompt: "" } as const) : action;
     // Translations get a card sized to the text instead of the remembered chat-card size
     this.card?.open(
-      `${a.label} · π`,
+      `${a.label} · ${BRAND_ZH}`,
       anchor ? { left: anchor.left, top: anchor.top, bottom: anchor.bottom } : null,
       a.mode === "translate" ? { fitText: sel.text.length } : undefined,
     );

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="CoRead 伴读">
+  <defs>
+    <linearGradient id="cr-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b4fd8"/>
+      <stop offset="1" stop-color="#8a5cf0"/>
+    </linearGradient>
+    <linearGradient id="cr-page-l" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".86"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity=".97"/>
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="22" fill="url(#cr-bg)"/>
+  <!-- open book: the reader's page (left) and the shared page (right) -->
+  <path d="M48 31.5C40.2 26.6 30 25 18 26.2v42.6c12-1.2 22.2.4 30 5.3z" fill="url(#cr-page-l)"/>
+  <path d="M48 31.5C55.8 26.6 66 25 78 26.2v42.6c-12-1.2-22.2.4-30 5.3z" fill="#ffffff"/>
+  <path d="M48 31.5v42.6" stroke="#6b5ce0" stroke-opacity=".35" stroke-width="1.6"/>
+  <!-- text lines -->
+  <g stroke="#b7aef3" stroke-width="3" stroke-linecap="round">
+    <path d="M24.5 37.5c6.5-.4 12.3.5 17.5 2.6"/>
+    <path d="M24.5 46c6.5-.4 12.3.5 17.5 2.6"/>
+    <path d="M24.5 54.5c6.5-.4 12.3.5 17.5 2.6"/>
+    <path d="M54 62.6c5.2-2.1 11-3 17.5-2.6"/>
+  </g>
+  <!-- the highlight the reader's attention is guided to -->
+  <path d="M53.6 39.9c5.6-2.4 11.8-3.4 18.4-3.1v8.6c-6.6-.3-12.8.7-18.4 3.1z" fill="#ffc94d"/>
+  <path d="M54 54c5.2-2.1 11-3 17.5-2.6" stroke="#b7aef3" stroke-width="3" stroke-linecap="round"/>
+  <!-- AI spark -->
+  <path d="M71 12.5l2.1 5.4 5.4 2.1-5.4 2.1-2.1 5.4-2.1-5.4-5.4-2.1 5.4-2.1z" fill="#ffe6a3"/>
+</svg>

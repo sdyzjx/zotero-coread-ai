@@ -1,5 +1,5 @@
 // Build the Zotero plugin: bundle core + web UI with esbuild, copy static assets,
-// and pack everything into build/zotero-pi-agent-<version>.xpi
+// and pack everything into build/zotero-coread-ai-<version>.xpi
 import { build } from "esbuild";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -9,6 +9,9 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dev = process.argv.includes("--dev");
+// --public: a build for distribution (website download): never embeds the .env API key
+const pub = process.argv.includes("--public");
+if (dev && pub) throw new Error("--public builds cannot be dev builds");
 const pkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 const content = path.join(root, "addon/content");
 
@@ -61,7 +64,7 @@ await cp(path.join(root, "addon"), stage, { recursive: true });
 // The resulting XPI then contains the key: keep it to yourself.
 let embeddedKey = false;
 const envPath = path.join(root, ".env");
-if (existsSync(envPath)) {
+if (!pub && existsSync(envPath)) {
   const env = Object.fromEntries(
     (await readFile(envPath, "utf8"))
       .split(/\r?\n/)
@@ -84,7 +87,12 @@ const manifestPath = path.join(stage, "manifest.json");
 const manifest = (await readFile(manifestPath, "utf8")).replace("__VERSION__", pkg.version);
 await writeFile(manifestPath, manifest);
 
-const xpi = path.join(root, `build/zotero-pi-agent-${pkg.version}.xpi`);
+const xpi = path.join(root, `build/zotero-coread-ai-${pkg.version}.xpi`);
 if (existsSync(xpi)) await rm(xpi);
 execFileSync("zip", ["-qr", "-9", xpi, "."], { cwd: stage });
+if (pub) {
+  // Belt and braces: a public XPI must not carry a key
+  const prefs = await readFile(path.join(stage, "prefs.js"), "utf8");
+  if (/apiKey", "[^"]+"/.test(prefs)) throw new Error("public build contains an API key");
+}
 console.log(`Built ${path.relative(root, xpi)}${dev ? " (dev)" : ""}${embeddedKey ? " — contains your DeepSeek API key from .env, do not share" : ""}`);

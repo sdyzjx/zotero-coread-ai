@@ -208,10 +208,10 @@ function App() {
   return (
     <div class="page">
       <header>
-        <div class="logo">π</div>
+        <img class="logo" src="icons/icon.svg" alt="" />
         <div>
-          <h1>Pi Agent 设置</h1>
-          <div class="sub">Zotero AI 阅读助手 · v{api.version}</div>
+          <h1>CoRead AI 设置</h1>
+          <div class="sub">AI 伴读 · 与 AI 协同精读论文 · v{api.version}</div>
         </div>
       </header>
 
@@ -489,7 +489,7 @@ function App() {
       <section>
         <h2>文章脉络</h2>
         <div class="hint top">阅读器左侧常驻一个悬浮的脉络导航，点击「生成文章脉络」后才会分析该论文（背景 → 问题 → 相关工作 → Gap → 方法 → 实验 → 结果 → 结论；综述梳理发展脉络与研究分支），结果会缓存。分析所用模型在「模型分配」中设置。</div>
-        <Field label="展开脉络导航" hint="关闭则收起为左边缘的小标签；也可以用导航上的 ‹ 按钮或阅读器工具栏的 π≡ 切换">
+        <Field label="展开脉络导航" hint="关闭则收起为左边缘的小标签；也可以用导航上的 ‹ 按钮或阅读器工具栏的脉络按钮切换">
           <Toggle checked={!!s.outlineVisible} onChange={(v) => set("outlineVisible", v)} />
         </Field>
       </section>
