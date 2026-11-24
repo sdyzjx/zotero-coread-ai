@@ -2,7 +2,19 @@ import { Type } from "@earendil-works/pi-ai";
 import { createHighlight, createNoteAnnotation, updateAnnotationComment } from "../annotate";
 import { getMainAttachment } from "../paper";
 import { ensureReader, navigateToPage, selectReaderTab } from "../reader-utils";
+import { commentProblems, COMMENT_LIMIT } from "../../shared/note-format";
 import { ok, tool, type Tool, type ToolContext } from "./common";
+
+const COMMENT_STYLE = `Keep it short: ≤ ${COMMENT_LIMIT} characters, 1–3 plain sentences or ≤ 5 flat bullets. **bold**, *italic* and inline $…$ math are allowed (shown as Unicode); no headings, tables, code blocks, display math or nested lists. Put longer explanations in the chat reply instead.`;
+
+/** Reject comments that are too long / structured, with a message telling the agent how to fix it. */
+function checkComment(comment: string | undefined): void {
+  if (!comment) return;
+  const problems = commentProblems(comment);
+  if (problems.length) {
+    throw new Error(`Annotation comment rejected: ${problems.join("; ")}. Rewrite it more briefly and call the tool again. ${COMMENT_STYLE}`);
+  }
+}
 import { resolvePaperItem } from "./paper-tools";
 
 const colorParam = Type.Optional(
@@ -18,13 +30,14 @@ export function annotationTools(ctx: ToolContext): Tool[] {
     parameters: Type.Object({
       quote: Type.String({ description: "Exact text from the paper" }),
       page: Type.Optional(Type.Number({ description: "1-based page number where the quote is" })),
-      comment: Type.Optional(Type.String({ description: "Comment attached to the highlight (markdown ok)" })),
+      comment: Type.Optional(Type.String({ description: `Comment attached to the highlight. ${COMMENT_STYLE}` })),
       color: colorParam,
       style: Type.Optional(Type.Union([Type.Literal("highlight"), Type.Literal("underline")])),
       item_key: Type.Optional(Type.String({ description: "Other paper's item key; omit for current paper" })),
     }),
     executionMode: "sequential",
     async execute(_id, p) {
+      checkComment(p.comment);
       const item = resolvePaperItem(ctx, p.item_key);
       const r = await createHighlight(item, { quote: p.quote, page: p.page, comment: p.comment, color: p.color, type: p.style });
       ctx.notify({ type: "annotation-created", key: r.key, attachmentID: r.attachmentID, page: r.pageLabel });
@@ -41,7 +54,7 @@ export function annotationTools(ctx: ToolContext): Tool[] {
     description:
       "Place a sticky-note annotation in the PDF with a comment. Positioned next to `near_text` (verbatim text from the paper) if given, otherwise at the top-left of `page`.",
     parameters: Type.Object({
-      comment: Type.String(),
+      comment: Type.String({ description: COMMENT_STYLE }),
       page: Type.Optional(Type.Number({ description: "1-based page" })),
       near_text: Type.Optional(Type.String({ description: "Verbatim text to place the note next to" })),
       color: colorParam,
@@ -49,6 +62,7 @@ export function annotationTools(ctx: ToolContext): Tool[] {
     }),
     executionMode: "sequential",
     async execute(_id, p) {
+      checkComment(p.comment);
       const item = resolvePaperItem(ctx, p.item_key);
       const r = await createNoteAnnotation(item, { comment: p.comment, page: p.page, nearText: p.near_text, color: p.color });
       ctx.notify({ type: "annotation-created", key: r.key, attachmentID: r.attachmentID, page: r.pageLabel });
@@ -62,10 +76,11 @@ export function annotationTools(ctx: ToolContext): Tool[] {
     description: "Replace or append to the comment of an existing annotation (key from get_annotations).",
     parameters: Type.Object({
       annotation_key: Type.String(),
-      comment: Type.String(),
+      comment: Type.String({ description: COMMENT_STYLE }),
       mode: Type.Optional(Type.Union([Type.Literal("replace"), Type.Literal("append")])),
     }),
     async execute(_id, p) {
+      checkComment(p.comment);
       await updateAnnotationComment(ctx.paper.libraryID, p.annotation_key, p.comment, p.mode || "append");
       return ok(`Updated comment of annotation ${p.annotation_key}.`);
     },

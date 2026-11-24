@@ -9,6 +9,7 @@ import { getModel, streamSimple } from "./llm";
 import { getItem, paperTitle, refFromItem, type PaperRef } from "./paper";
 import type { SessionManager } from "./sessions";
 import { resolveColor, saveSelectionAsHighlight } from "./annotate";
+import { markdownToComment } from "../shared/note-format";
 import type { RenderedRegion } from "./vision";
 import { toImageContent } from "./vision";
 
@@ -199,7 +200,9 @@ export class QuickService {
   }
 
   /** Save the selection as a highlight with the given comment (e.g. the translation). */
-  async saveAsAnnotation(comment: string): Promise<string | null> {
+  async saveAsAnnotation(markdown: string): Promise<string | null> {
+    // Zotero comments only render b / i / sub / sup: convert markdown + LaTeX
+    const comment = markdownToComment(markdown);
     const job = this.job;
     if (!job) return null;
     const att = Zotero.Items.get(job.attachmentID);
