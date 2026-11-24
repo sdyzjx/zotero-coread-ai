@@ -1,6 +1,6 @@
 # Zotero Pi Agent
 
-基于 [pi agent](https://github.com/earendil-works/pi)（`@earendil-works/pi-agent-core` + `pi-ai`）的 Zotero 7–9 AI 阅读助手插件。核心 agent 循环、模型接入与流式输出全部由 pi 提供，本插件只负责接入 Zotero 相关的工具与界面。
+基于 [pi agent](https://github.com/earendil-works/pi)（`@earendil-works/pi-agent-core` + `pi-ai`）的 Zotero 7–10 AI 阅读助手插件。核心 agent 循环、模型接入与流式输出全部由 pi 提供，本插件只负责接入 Zotero 相关的工具与界面。
 
 ## 功能
 

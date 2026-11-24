@@ -1,4 +1,5 @@
 import "./polyfill-install";
+import { disposePolyfills, installPolyfills } from "./polyfill";
 import { getSettings, saveSettings, type QuickAction, type Settings } from "./config";
 import { ContextTracker } from "./context";
 import { globalEvents } from "./events";
@@ -72,6 +73,7 @@ class ZoteroPiAddon {
     if (this.win === win) return;
     if (this.win) this.onMainWindowUnload(this.win);
     this.win = win;
+    installPolyfills(win); // fills anything still missing if no other source window existed
     this.panel = new ChatPanel(win);
     this.panel.setTitle(this.context.get()?.title || "Pi Agent");
     this.card = new QuickCard(
@@ -129,6 +131,7 @@ class ZoteroPiAddon {
     globalEvents.clear();
     for (const w of Services.wm.getEnumerator("zoteropi:settings")) w.close();
     if (__DEV__) unregisterDevEndpoint();
+    disposePolyfills();
     await closeStore();
   }
 
