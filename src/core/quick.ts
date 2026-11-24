@@ -79,8 +79,17 @@ export class QuickService {
     this.changes.emit({ ...this.job });
   }
 
+  /**
+   * Stop the running job without announcing "no job": the card for the new job is already
+   * open, and a null event would close it (the 2nd quick action showed nothing).
+   */
+  private abortCurrent(): void {
+    this.abortCtrl?.abort();
+    this.abortCtrl = null;
+  }
+
   async start(action: QuickAction | { id: "ask"; label: string; mode: "ask"; prompt: "" }, attachmentID: number, selection: Selection): Promise<QuickJob | null> {
-    this.cancel();
+    this.abortCurrent();
     const att = Zotero.Items.get(attachmentID);
     const paper = att && refFromItem(att);
     if (!paper) return null;
@@ -103,7 +112,7 @@ export class QuickService {
 
   /** 框图 / image annotation: show the image with action choices. */
   startImage(attachmentID: number, image: RenderedRegion, annotationKey?: string): QuickJob | null {
-    this.cancel();
+    this.abortCurrent();
     const att = Zotero.Items.get(attachmentID);
     const paper = att && refFromItem(att);
     if (!paper) return null;
