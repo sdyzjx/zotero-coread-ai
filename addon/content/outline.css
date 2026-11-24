@@ -36,6 +36,16 @@
   display: none !important;
 }
 
+/* A Zotero reader popup overlaps us: get out of its way until it closes */
+.zpo-root.zpo-yield .zpo-gutter,
+.zpo-root.zpo-yield .zpo-resizer,
+.zpo-root.zpo-yield .zpo-pill,
+.zpo-pop.zpo-yield-pop {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 0.12s ease;
+}
+
 /* ---------------------------------------------------------------- container */
 .zpo-gutter {
   position: fixed;
@@ -152,6 +162,22 @@
 }
 .zpo-gutter:hover .zpo-btn {
   opacity: 1;
+}
+.zpo-btn.zpo-btn-text {
+  width: auto;
+  padding: 0 6px;
+  font-size: 11px;
+  opacity: 1;
+  color: var(--zpo-muted);
+  border: 1px solid var(--zpo-line);
+  height: 18px;
+  line-height: 16px;
+  border-radius: 9px;
+}
+.zpo-btn.zpo-btn-text[data-on="true"] {
+  color: var(--zpo-accent);
+  background: var(--zpo-accent-soft);
+  border-color: color-mix(in srgb, var(--zpo-accent) 45%, transparent);
 }
 .zpo-btn:hover {
   background: var(--zpo-hover);
@@ -783,6 +809,31 @@
 }
 
 /* ---------------------------------------------------------------- guide */
+/* All key passages: light block background + tinted, underlined key sentence */
+.zpo-marks {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: visible;
+  pointer-events: none;
+}
+.zpo-mark-block {
+  fill: var(--zpo-guide, var(--zpo-accent));
+  fill-opacity: 0.09;
+}
+.zpo-mark-focus {
+  fill: var(--zpo-guide, var(--zpo-accent));
+  fill-opacity: 0.24;
+}
+.zpo-mark-line {
+  stroke: color-mix(in srgb, var(--zpo-guide, var(--zpo-accent)) 85%, #333);
+  stroke-opacity: 0.6;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
 .zpo-guide {
   position: fixed;
   left: 0;

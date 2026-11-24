@@ -95,6 +95,21 @@ interface Guide {
   oy: number;
 }
 
+/** Something whose key sentence the hover popup acts on: the jump highlight or a key mark. */
+interface PopTarget {
+  region: AnchorRegion;
+  color: string;
+  /** Key-sentence line boxes in main-window coordinates (kept current by the owner's frame loop). */
+  focus: Box[];
+}
+
+/** One key block (+ its key sentence) in the "show all key passages" layer. */
+interface MarkItem extends PopTarget {
+  nodeId: string;
+  box: Box | null;
+  els: { box: SVGElement; focus: SVGElement[]; lines: SVGElement[] };
+}
+
 interface Box {
   left: number;
   top: number;
@@ -152,6 +167,17 @@ export class OutlineGutter {
   private activeId: string | null = null;
   private timer: any = null;
   private guide: Guide | null = null;
+  private popTarget: PopTarget | null = null;
+  /** Last pdf.js document offset in main-window coordinates (maps viewer events). */
+  private vo = { ox: 0, oy: 0 };
+  /** "Show all key passages" layer. */
+  private marks: { key: string; items: MarkItem[]; svg: SVGSVGElement; clip: SVGElement; raf: number; sig: string } | null = null;
+  private marksToken = 0;
+  /** Zotero reader popups (annotation / selection / citation …) in main-window coordinates. */
+  private popupBoxes: Box[] = [];
+  private popupSig = "";
+  private readerObs: { doc: any; mo: any } | null = null;
+  private popupRaf = 0;
   private pop!: HTMLElement;
   private popOpen = false;
   private popTimer: any = null;
@@ -244,6 +270,7 @@ export class OutlineGutter {
     this.reader = isPdf ? reader : null;
     if (!sameKey) {
       this.cancelGuide();
+      this.removeMarks();
       this.renderedKey = "";
       this.lastPage = -1;
     }
@@ -284,6 +311,7 @@ export class OutlineGutter {
       const ox = R.left + I.left;
       const oy = R.top + I.top;
       const view = { left: ox + C.left, top: oy + C.top, right: ox + Math.min(C.right, I.width), bottom: oy + Math.min(C.bottom, I.height) };
+      this.vo = { ox, oy };
       return { view, hostLeft: R.left + H.left, hostWidth: H.width, ox, oy, app, pv };
     } catch {
       return null;
@@ -361,6 +389,7 @@ export class OutlineGutter {
   private tick(): void {
     this.syncViewerListeners();
     this.layout();
+    this.updatePopups();
     this.updateReadingPosition();
     const el = this.gutter.querySelector(".zpo-elapsed");
     if (el && this.loadingSince) el.textContent = `${Math.round((Date.now() - this.loadingSince) / 1000)}s`;
@@ -461,7 +490,7 @@ export class OutlineGutter {
     const hasNodes = !!o?.sections.length;
 
     // Header: rebuilt only when its buttons / badge change
-    const headSig = `${pk}|${state.status}|${o?.kind || ""}`;
+    const headSig = `${pk}|${state.status}|${o?.kind || ""}|${this.marksOn()}`;
     if (this.headSig !== headSig || !this.headEl) {
       this.headSig = headSig;
       const head = h(doc, "div", { class: "zpo-head" }, [
@@ -470,7 +499,14 @@ export class OutlineGutter {
       ]);
       if (o) head.append(h(doc, "span", { class: "zpo-kind", text: o.kind === "survey" ? "综述" : "研究" }));
       head.append(h(doc, "span", { class: "zpo-spacer" }));
-      if (state.status === "ready") head.append(this.btn("⊟", "全部折叠 / 展开", () => this.toggleAll()));
+      if (state.status === "ready") {
+        const on = this.marksOn();
+        const t = this.btn("重点", on ? "隐藏文中所有重点块与重点句" : "在文中显示所有重点块（浅色底）与重点句", () => this.toggleMarks());
+        t.classList.add("zpo-btn-text");
+        t.setAttribute("data-on", String(on));
+        head.append(t);
+        head.append(this.btn("⊟", "全部折叠 / 展开", () => this.toggleAll()));
+      }
       if (state.status === "ready" || state.status === "error") {
         head.append(this.btn("↻", "重新分析文章脉络", () => this.ctx && this.service.generate(this.ctx.ref, true)));
       }
@@ -553,6 +589,7 @@ export class OutlineGutter {
     this.setParts(parts);
     this.applyActive();
     if (o?.relations.length) this.win.requestAnimationFrame(() => this.drawArcs());
+    this.syncMarks();
   }
 
   /** Put `parts` in order without detaching elements that are already in place (no restarts). */
@@ -932,8 +969,149 @@ export class OutlineGutter {
     if (!this.guide) return;
     this.win.cancelAnimationFrame(this.guide.raf);
     this.guideSvg.textContent = "";
+    if (this.popTarget === this.guide) {
+      this.hidePop(true);
+      this.popTarget = null;
+    }
     this.guide = null;
-    this.hidePop(true);
+  }
+
+  // ------------------------------------------------------------------ all key passages
+
+  private marksOn(): boolean {
+    return !!getPref<boolean>("outlineMarksVisible");
+  }
+
+  private toggleMarks(): void {
+    setPref("outlineMarksVisible", !this.marksOn());
+    this.headSig = ""; // refresh the toggle button state
+    this.renderedKey = "";
+    if (this.ctx) this.render(this.service.state(this.ctx.ref));
+  }
+
+  /** Show / update / remove the marks layer to match the toggle and the current outline. */
+  private syncMarks(): void {
+    const o = this.outline;
+    const ready = !!this.ctx && !!o && this.service.state(this.ctx.ref).status === "ready";
+    if (!ready || !this.marksOn() || !this.reader) {
+      this.removeMarks();
+      return;
+    }
+    const key = `${paperKey(this.ctx!.ref)}|${o!.created}`;
+    if (this.marks?.key === key) return;
+    this.removeMarks();
+    void this.buildMarks(key, o!);
+  }
+
+  private removeMarks(): void {
+    this.marksToken++;
+    if (!this.marks) return;
+    this.win.cancelAnimationFrame(this.marks.raf);
+    if (this.popTarget && this.marks.items.includes(this.popTarget as MarkItem)) {
+      this.hidePop(true);
+      this.popTarget = null;
+    }
+    this.marks.svg.remove();
+    this.marks = null;
+  }
+
+  /**
+   * Resolve every node's anchors to key blocks + key sentences (in outline order). A block that
+   * overlaps one already shown is skipped, so a repeated passage shows its first node only.
+   */
+  private async buildMarks(key: string, o: PaperOutline): Promise<void> {
+    const token = ++this.marksToken;
+    const reader = this.reader;
+    const found: { region: AnchorRegion; color: string; nodeId: string }[] = [];
+    for (const f of flattenOutline(o)) {
+      for (const a of f.node.anchors) {
+        if (!a.quote && !a.figure) continue;
+        const region = await resolveAnchor(reader, a);
+        if (token !== this.marksToken || reader !== this.reader) return;
+        if (!region?.box) continue;
+        const dup = found.some((x) => x.region.pageIndex === region.pageIndex && overlapRatio(x.region.box!, region.box!) > 0.5);
+        if (dup) continue;
+        found.push({ region, color: this.colorOf(f.node.id), nodeId: f.node.id });
+      }
+    }
+    if (token !== this.marksToken) return;
+    const doc = this.doc;
+    const mk = (tag: string, attrs: Record<string, string> = {}) => {
+      const el = doc.createElementNS(SVG_NS, tag) as SVGElement;
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+      return el;
+    };
+    const svg = mk("svg", { class: "zpo-marks" }) as SVGSVGElement;
+    const clipId = "zpo-marks-clip";
+    const clip = mk("rect");
+    const cp = mk("clipPath", { id: clipId });
+    cp.append(clip);
+    const defs = mk("defs");
+    defs.append(cp);
+    const holes = mk("mask", { id: "zpo-marks-holes", maskUnits: "userSpaceOnUse" });
+    defs.append(holes);
+    const layer = mk("g", { "clip-path": `url(#${clipId})`, mask: "url(#zpo-marks-holes)" });
+    svg.append(defs, layer);
+    const items: MarkItem[] = found.map((f) => {
+      const g = mk("g", { class: "zpo-mark-item" });
+      g.style.setProperty("--zpo-guide", f.color);
+      const box = mk("rect", { class: "zpo-mark-block", rx: "4", ry: "4" });
+      const focus = f.region.focus.slice(0, 16).map(() => mk("rect", { class: "zpo-mark-focus", rx: "2", ry: "2" }));
+      const lines = f.region.focus.slice(0, 16).map(() => mk("line", { class: "zpo-mark-line" }));
+      g.append(box, ...focus, ...lines);
+      layer.append(g);
+      return { ...f, box: null, focus: [], els: { box, focus, lines } };
+    });
+    // Under the jump guide so a fresh jump stays on top
+    this.root.insertBefore(svg, this.guideSvg);
+    this.marks = { key, items, svg, clip, raf: 0, sig: "" };
+    const frame = () => {
+      const m = this.marks;
+      if (!m || m.svg !== svg) return;
+      m.raf = this.win.requestAnimationFrame(frame);
+      const sig = this.viewSignature();
+      if (sig === m.sig) return;
+      m.sig = sig;
+      const g = this.geometry();
+      svg.style.display = g && this.mode !== "none" ? "" : "none";
+      if (!g) return;
+      clip.setAttribute("x", String(g.view.left));
+      clip.setAttribute("y", String(g.view.top));
+      clip.setAttribute("width", String(Math.max(0, g.view.right - g.view.left)));
+      clip.setAttribute("height", String(Math.max(0, g.view.bottom - g.view.top)));
+      this.fillHoles(holes);
+      for (const it of m.items) {
+        const b = this.regionBox(g, it.region, it.region.box);
+        // Skip pages far outside the view
+        const near = !!b && b.bottom > g.view.top - 400 && b.top < g.view.bottom + 400;
+        (it.els.box.parentNode as SVGElement).style.display = near ? "" : "none";
+        it.box = near ? b : null;
+        it.focus = [];
+        if (!near || !b) continue;
+        const pad = 3;
+        it.els.box.setAttribute("x", String(b.left - pad));
+        it.els.box.setAttribute("y", String(b.top - pad));
+        it.els.box.setAttribute("width", String(b.right - b.left + pad * 2));
+        it.els.box.setAttribute("height", String(b.bottom - b.top + pad * 2));
+        it.region.focus.slice(0, 16).forEach((r, i) => {
+          const fb = this.regionBox(g, it.region, r);
+          if (!fb) return;
+          it.focus.push(fb);
+          const f = it.els.focus[i];
+          f.setAttribute("x", String(fb.left - 1.5));
+          f.setAttribute("y", String(fb.top - 1));
+          f.setAttribute("width", String(fb.right - fb.left + 3));
+          f.setAttribute("height", String(fb.bottom - fb.top + 2));
+          const l = it.els.lines[i];
+          l.setAttribute("x1", String(fb.left));
+          l.setAttribute("x2", String(fb.right));
+          l.setAttribute("y1", String(fb.bottom + 1.5));
+          l.setAttribute("y2", String(fb.bottom + 1.5));
+        });
+      }
+      if (this.popOpen && this.popTarget && m.items.includes(this.popTarget as MarkItem)) this.placePop();
+    };
+    this.marks.raf = this.win.requestAnimationFrame(frame);
   }
 
   /** Box of a region in main-window coordinates (null if its page isn't laid out). */
@@ -964,7 +1142,7 @@ export class OutlineGutter {
       const viewer = waive(waive(waive(pv._iframeWindow).PDFViewerApplication).pdfViewer);
       const c = waive(viewer.container);
       const f = (this.reader._iframe as Element).getBoundingClientRect();
-      return `${c.scrollTop}|${c.scrollLeft}|${c.clientWidth}|${c.clientHeight}|${viewer.currentScale}|${f.left}|${f.top}|${f.width}`;
+      return `${c.scrollTop}|${c.scrollLeft}|${c.clientWidth}|${c.clientHeight}|${viewer.currentScale}|${f.left}|${f.top}|${f.width}|${this.popupSig}`;
     } catch {
       return "";
     }
@@ -991,7 +1169,9 @@ export class OutlineGutter {
     const clipRect = mk("rect", {});
     clip.append(clipRect);
     defs.append(clip);
-    const group = mk("g", { "clip-path": `url(#${clipId})` });
+    const holes = mk("mask", { id: "zpo-guide-holes", maskUnits: "userSpaceOnUse" });
+    defs.append(holes);
+    const group = mk("g", { "clip-path": `url(#${clipId})`, mask: "url(#zpo-guide-holes)" });
     group.style.setProperty("--zpo-guide", color);
     const box = mk("rect", { class: "zpo-guide-box", rx: "6", ry: "6" });
     const focusRects = region.focus.slice(0, 16);
@@ -1027,6 +1207,7 @@ export class OutlineGutter {
       if (!g || !target) return;
       guide.ox = g.ox;
       guide.oy = g.oy;
+      this.fillHoles(holes);
       clipRect.setAttribute("x", String(g.hostLeft));
       clipRect.setAttribute("y", String(g.view.top));
       clipRect.setAttribute("width", String(Math.max(0, g.view.right - g.hostLeft)));
@@ -1109,6 +1290,7 @@ export class OutlineGutter {
     } catch {
       win = null;
     }
+    this.syncReaderObserver();
     if (win === this.viewerWin) return;
     this.detachViewer();
     if (!win) return;
@@ -1133,27 +1315,122 @@ export class OutlineGutter {
     }
   }
 
+  // ------------------------------------------------------------------ yield to Zotero's popups
+
+  /** Watch the reader document so we notice Zotero's popups as soon as they open / close. */
+  private syncReaderObserver(): void {
+    let doc: any = null;
+    try {
+      doc = this.reader?._iframeWindow?.document || null;
+    } catch {
+      doc = null;
+    }
+    if (this.readerObs?.doc === doc) return;
+    try {
+      this.readerObs?.mo.disconnect();
+    } catch {
+      // gone
+    }
+    this.readerObs = null;
+    if (!doc?.body) {
+      this.updatePopups();
+      return;
+    }
+    const mo = new doc.defaultView.MutationObserver(() => this.schedulePopupCheck());
+    mo.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
+    this.readerObs = { doc, mo };
+    this.updatePopups();
+  }
+
+  private schedulePopupCheck(): void {
+    if (this.popupRaf) return;
+    this.popupRaf = this.win.requestAnimationFrame(() => {
+      this.popupRaf = 0;
+      this.updatePopups();
+    });
+  }
+
+  /**
+   * Our layers sit above the reader, so they would cover its popups: when a popup overlaps the
+   * navigator (or its tab / our action bar) those fade out and stop taking clicks, and the
+   * page marks leave a hole where the popup is.
+   */
+  private updatePopups(): void {
+    const boxes: Box[] = [];
+    try {
+      const doc = this.readerObs?.doc;
+      const frame = this.reader?._iframe as Element | undefined;
+      if (doc && frame && this.mode !== "none") {
+        const R = frame.getBoundingClientRect();
+        for (const p of Array.from(doc.querySelectorAll(".view-popup, .dialog-popup-overlay")) as Element[]) {
+          const r = p.getBoundingClientRect();
+          if (r.width < 4 || r.height < 4) continue;
+          boxes.push({ left: R.left + r.left, top: R.top + r.top, right: R.left + r.right, bottom: R.top + r.bottom });
+        }
+      }
+    } catch {
+      // reader closing
+    }
+    const sig = boxes.map((b) => `${Math.round(b.left)},${Math.round(b.top)},${Math.round(b.right)},${Math.round(b.bottom)}`).join(";");
+    if (sig === this.popupSig) return;
+    this.popupSig = sig;
+    this.popupBoxes = boxes;
+    const overlaps = (el: HTMLElement) => {
+      if (el.hidden) return false;
+      const r = el.getBoundingClientRect();
+      return boxes.some((b) => b.left < r.right && b.right > r.left && b.top < r.bottom && b.bottom > r.top);
+    };
+    this.root.classList.toggle("zpo-yield", boxes.length > 0 && (overlaps(this.gutter) || overlaps(this.pill) || overlaps(this.resizer)));
+    this.pop.classList.toggle("zpo-yield-pop", boxes.length > 0 && overlaps(this.pop));
+  }
+
+  /** Cut the reader popups out of a mask (white = draw, black = hole). */
+  private fillHoles(mask: SVGElement): void {
+    const NS = SVG_NS;
+    const sig = this.popupSig;
+    if (mask.getAttribute("data-sig") === sig && mask.firstChild) return;
+    mask.setAttribute("data-sig", sig);
+    mask.textContent = "";
+    const all = this.doc.createElementNS(NS, "rect");
+    for (const [k, v] of Object.entries({ x: "-10000", y: "-10000", width: "30000", height: "30000", fill: "white" })) all.setAttribute(k, v);
+    mask.append(all);
+    for (const b of this.popupBoxes) {
+      const r = this.doc.createElementNS(NS, "rect");
+      for (const [k, v] of Object.entries({ x: String(b.left - 4), y: String(b.top - 4), width: String(b.right - b.left + 8), height: String(b.bottom - b.top + 8), rx: "8", fill: "black" })) r.setAttribute(k, v);
+      mask.append(r);
+    }
+  }
+
   private inside(b: Box | null, x: number, y: number, m = 0): boolean {
     return !!b && x >= b.left - m && x <= b.right + m && y >= b.top - m && y <= b.bottom + m;
   }
 
   /** Clicking anywhere in the paper outside the highlighted block dismisses the highlight. */
   private onViewerDown = (e: PointerEvent) => {
+    const x = this.vo.ox + e.clientX;
+    const y = this.vo.oy + e.clientY;
+    // Clicking a key sentence of the marks layer points to its node in the outline
+    const hit = this.marks?.items.find((it) => it.focus.some((b) => this.inside(b, x, y, 2)));
+    if (hit) {
+      this.reveal(hit.nodeId);
+    }
     const gd = this.guide;
-    if (!gd) return;
-    const x = gd.ox + e.clientX;
-    const y = gd.oy + e.clientY;
-    if (!this.inside(gd.box, x, y, 4)) this.cancelGuide();
+    if (gd && !this.inside(gd.box, x, y, 4)) this.cancelGuide();
   };
 
-  /** Hovering the key sentence offers quick actions. */
+  /** Hovering a key sentence (jump highlight or marks layer) offers quick actions. */
   private onViewerMove = (e: MouseEvent) => {
-    const gd = this.guide;
-    if (!gd || !gd.focus.length || !gd.region.text) return;
-    const x = gd.ox + e.clientX;
-    const y = gd.oy + e.clientY;
-    if (gd.focus.some((b) => this.inside(b, x, y, 3))) this.showPop();
-    else if (this.popOpen) this.hidePop(false);
+    const x = this.vo.ox + e.clientX;
+    const y = this.vo.oy + e.clientY;
+    const over = (t: PopTarget | null | undefined) => !!t && !!t.region.text && t.focus.some((b) => this.inside(b, x, y, 3));
+    let target: PopTarget | null = null;
+    if (over(this.guide)) target = this.guide;
+    else target = this.marks?.items.find((it) => over(it)) || null;
+    if (target) {
+      if (this.popOpen && this.popTarget !== target) this.hidePop(true);
+      this.popTarget = target;
+      this.showPop();
+    } else if (this.popOpen) this.hidePop(false);
   };
 
   private onViewerResize = () => {
@@ -1248,7 +1525,7 @@ export class OutlineGutter {
     add("问 AI", "把这句话引用到右侧 AI 侧栏，输入你的问题", () => this.askPanel());
     add("划重点", "用本节的代表颜色把这句话保存为高亮批注", (b) => void this.highlightSentence(b), "zpo-pop-mark");
     const mark = this.pop.querySelector(".zpo-pop-mark") as HTMLElement;
-    mark.style.setProperty("--zpo-mark", this.guide?.color || ZOTERO_COLORS.purple);
+    mark.style.setProperty("--zpo-mark", this.popTarget?.color || ZOTERO_COLORS.purple);
   }
 
   private showPop(): void {
@@ -1272,7 +1549,7 @@ export class OutlineGutter {
 
   /** Below the key sentence (above it if there is no room), inside the reader view. */
   private placePop(): void {
-    const gd = this.guide;
+    const gd = this.popTarget;
     const g = this.geometry();
     if (!gd || !gd.focus.length || !g) return;
     const first = gd.focus[0];
@@ -1298,7 +1575,7 @@ export class OutlineGutter {
   }
 
   private runAction(a: QuickAction): void {
-    const sel = this.guide && this.selectionOf(this.guide.region);
+    const sel = this.popTarget && this.selectionOf(this.popTarget.region);
     if (!sel || !this.reader) return;
     const anchor = this.popAnchor();
     this.hidePop(true);
@@ -1306,14 +1583,14 @@ export class OutlineGutter {
   }
 
   private askPanel(): void {
-    const sel = this.guide && this.selectionOf(this.guide.region);
+    const sel = this.popTarget && this.selectionOf(this.popTarget.region);
     if (!sel) return;
     this.hidePop(true);
     this.host.askInPanel(sel.text, sel.pageLabel || "");
   }
 
   private async highlightSentence(btn: HTMLElement): Promise<void> {
-    const gd = this.guide;
+    const gd = this.popTarget;
     const region = gd?.region;
     if (!region?.text || !region.viewBox || region.start === undefined || !this.reader) return;
     btn.setAttribute("disabled", "true");
@@ -1340,6 +1617,13 @@ export class OutlineGutter {
 
   destroy(): void {
     clearInterval(this.timer);
+    try {
+      this.readerObs?.mo.disconnect();
+    } catch {
+      // gone
+    }
+    this.readerObs = null;
+    this.removeMarks();
     clearTimeout(this.popTimer);
     this.detachViewer();
     this.releaseAll();
@@ -1348,6 +1632,15 @@ export class OutlineGutter {
     this.root.remove();
     this.doc.getElementById("zoteropi-outline-css")?.remove();
   }
+}
+
+/** Intersection area over the smaller box's area (rects in PDF space). */
+function overlapRatio(a: number[], b: number[]): number {
+  const w = Math.min(a[2], b[2]) - Math.max(a[0], b[0]);
+  const hh = Math.min(a[3], b[3]) - Math.max(a[1], b[1]);
+  if (w <= 0 || hh <= 0) return 0;
+  const area = (r: number[]) => Math.max(1e-6, (r[2] - r[0]) * (r[3] - r[1]));
+  return (w * hh) / Math.min(area(a), area(b));
 }
 
 /** Background of the pdf.js viewer, used for the strip the column occupies. */
