@@ -6,7 +6,10 @@
  * scrolls the PDF to the paragraph / figure and draws a translucent guide
  * (connector + soft box) that fades out by itself.
  */
-import { getSettings, saveSettings } from "../config";
+import { getSettings, saveSettings, type QuickAction } from "../config";
+import { saveRegionHighlight } from "../annotate";
+import type { Selection } from "../quick";
+import { getPageLabel } from "../reader-utils";
 import type { ContextTracker, PaperContext } from "../context";
 import { resolveAnchor, type AnchorRegion, type OutlineService, type OutlineState } from "../outline";
 import { RELATION_LABELS, flattenOutline, type OutlineAnchor, type OutlineNode, type PaperOutline } from "../outline-schema";
@@ -56,6 +59,24 @@ const ROLE_COLORS: Record<string, string> = {
   挑战与展望: SECTION_COLORS.challenges,
 };
 
+export interface OutlineHost {
+  /** Run a selection quick action (explain / translate / …) on a passage. */
+  runQuickAction(reader: any, action: QuickAction, sel: Selection, anchor: DOMRect | null): void;
+  /** Quote a passage into the chat side panel. */
+  askInPanel(text: string, pageLabel: string): void;
+}
+
+interface Guide {
+  region: AnchorRegion;
+  raf: number;
+  /** Highlight box and key-sentence line boxes in main-window coordinates (last frame). */
+  box: Box | null;
+  focus: Box[];
+  /** Offset of the pdf.js document (to map viewer events to main-window coordinates). */
+  ox: number;
+  oy: number;
+}
+
 interface Box {
   left: number;
   top: number;
@@ -101,7 +122,14 @@ export class OutlineGutter {
   private rows = new Map<string, HTMLElement>();
   private activeId: string | null = null;
   private timer: any = null;
-  private guideStop: (() => void) | null = null;
+  private guide: Guide | null = null;
+  private pop!: HTMLElement;
+  private popOpen = false;
+  private popTimer: any = null;
+  private viewerWin: any = null;
+  private resizeRaf = 0;
+  private lastViewW = 0;
+  private lastViewReader: any = null;
   private renderedKey = "";
   private unsubs: (() => void)[] = [];
   private lastPage = -1;
@@ -110,6 +138,7 @@ export class OutlineGutter {
     win: any,
     private service: OutlineService,
     private context: ContextTracker,
+    private host: OutlineHost,
   ) {
     this.win = win;
     this.doc = win.document;
@@ -148,6 +177,7 @@ export class OutlineGutter {
       this.layout();
     });
     this.root.append(this.gutter, this.resizer, this.pill, this.guideSvg);
+    this.buildPop();
     doc.documentElement.appendChild(this.root);
   }
 
@@ -188,6 +218,7 @@ export class OutlineGutter {
       this.renderedKey = "";
       this.lastPage = -1;
     }
+    this.syncViewerListeners();
     if (!this.ctx) {
       this.outline = null;
       this.layout();
@@ -299,6 +330,7 @@ export class OutlineGutter {
   }
 
   private tick(): void {
+    this.syncViewerListeners();
     this.layout();
     this.updateReadingPosition();
     const el = this.gutter.querySelector(".zpo-elapsed");
@@ -324,6 +356,7 @@ export class OutlineGutter {
     this.releaseAll(mode === "docked" ? this.reader : undefined);
     if (mode === "docked") this.reserve(this.reader, width);
     else if (this.reader) this.reserve(this.reader, 0);
+    this.keepViewport();
 
     if (mode !== this.mode) {
       this.mode = mode;
@@ -710,8 +743,11 @@ export class OutlineGutter {
   }
 
   private cancelGuide(): void {
-    this.guideStop?.();
-    this.guideStop = null;
+    if (!this.guide) return;
+    this.win.cancelAnimationFrame(this.guide.raf);
+    this.guideSvg.textContent = "";
+    this.guide = null;
+    this.hidePop(true);
   }
 
   /** Box of a region in main-window coordinates (null if its page isn't laid out). */
@@ -735,13 +771,31 @@ export class OutlineGutter {
     }
   }
 
+  /** Cheap fingerprint of everything that moves the highlight (scroll, zoom, layout). */
+  private viewSignature(): string {
+    try {
+      const pv = waive(waive(this.reader._internalReader)._primaryView);
+      const viewer = waive(waive(waive(pv._iframeWindow).PDFViewerApplication).pdfViewer);
+      const c = waive(viewer.container);
+      const f = (this.reader._iframe as Element).getBoundingClientRect();
+      return `${c.scrollTop}|${c.scrollLeft}|${c.clientWidth}|${c.clientHeight}|${viewer.currentScale}|${f.left}|${f.top}|${f.width}`;
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Highlight the jump target: a soft box around the paragraph / figure with the key sentence
+   * marked (tint + underline), plus a connector from the outline node that fades after a few
+   * seconds. The highlight itself stays until the user clicks elsewhere in the paper.
+   */
   private showGuide(region: AnchorRegion, from: HTMLElement): void {
     this.cancelGuide();
     const doc = this.doc;
     const svg = this.guideSvg;
     svg.textContent = "";
     const mk = (tag: string, attrs: Record<string, string>) => {
-      const el = doc.createElementNS(SVG_NS, tag);
+      const el = doc.createElementNS(SVG_NS, tag) as SVGElement;
       for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
       return el;
     };
@@ -753,37 +807,45 @@ export class OutlineGutter {
     defs.append(clip);
     const group = mk("g", { "clip-path": `url(#${clipId})` });
     const box = mk("rect", { class: "zpo-guide-box", rx: "6", ry: "6" });
-    const focus = region.focus.slice(0, 12).map(() => mk("rect", { class: "zpo-guide-focus", rx: "2", ry: "2" }));
-    const marks = region.focus.slice(0, 12).map(() => mk("line", { class: "zpo-guide-mark" }));
+    const focusRects = region.focus.slice(0, 16);
+    const focus = focusRects.map(() => mk("rect", { class: "zpo-guide-focus", rx: "2", ry: "2" }));
+    const marks = focusRects.map(() => mk("line", { class: "zpo-guide-mark" }));
     const path = mk("path", { class: "zpo-guide-line" });
     const dot = mk("circle", { class: "zpo-guide-dot", r: "3" });
     const start = mk("circle", { class: "zpo-guide-start", r: "2.5" });
     group.append(box, ...focus, ...marks, path, dot, start);
     svg.append(defs, group);
 
-    const t0 = this.win.performance.now();
     const LINE_HOLD = 2600;
-    const BOX_HOLD = 3800;
     const FADE = 800;
-    let raf = 0;
-    let stopped = false;
-    const fade = (t: number, hold: number) => (t < 220 ? t / 220 : t < hold ? 1 : Math.max(0, 1 - (t - hold) / FADE));
+    const guide: Guide = { region, raf: 0, box: null, focus: [], ox: 0, oy: 0 };
+    this.guide = guide;
+    const t0 = this.win.performance.now();
+    let sig = "";
+    let lineGone = false;
 
     const frame = () => {
-      if (stopped) return;
+      if (this.guide !== guide) return;
+      guide.raf = this.win.requestAnimationFrame(frame);
       const t = this.win.performance.now() - t0;
+      const animating = t < LINE_HOLD + FADE + 50;
+      // Once the connector is gone, only recompute when the view actually moved
+      if (!animating) {
+        const next = this.viewSignature();
+        if (next === sig && lineGone) return;
+        sig = next;
+      }
       const g = this.geometry();
       const target = g ? this.regionBox(g, region, region.box) : null;
-      if (!g || !target || t > BOX_HOLD + FADE) {
-        stop();
-        return;
-      }
-      // Clip to the reader view (incl. the gutter) so nothing paints over the toolbar
+      if (!g || !target) return;
+      guide.ox = g.ox;
+      guide.oy = g.oy;
       clipRect.setAttribute("x", String(g.hostLeft));
       clipRect.setAttribute("y", String(g.view.top));
       clipRect.setAttribute("width", String(Math.max(0, g.view.right - g.hostLeft)));
       clipRect.setAttribute("height", String(Math.max(0, g.view.bottom - g.view.top)));
 
+      const appear = String(Math.min(1, t / 220));
       const pad = region.box ? 5 : 0;
       const bx = target.left - pad;
       const by = target.top - pad;
@@ -793,23 +855,35 @@ export class OutlineGutter {
       box.setAttribute("y", String(by));
       box.setAttribute("width", String(bw));
       box.setAttribute("height", String(bh));
-      box.style.opacity = String(fade(t, BOX_HOLD));
-      region.focus.slice(0, 12).forEach((r, i) => {
+      box.style.opacity = appear;
+      guide.box = { left: bx, top: by, right: bx + bw, bottom: by + bh };
+      guide.focus = [];
+      focusRects.forEach((r, i) => {
         const fb = this.regionBox(g, region, r);
         if (!fb) return;
+        guide.focus.push(fb);
         focus[i].setAttribute("x", String(fb.left - 2));
         focus[i].setAttribute("y", String(fb.top - 1.5));
         focus[i].setAttribute("width", String(fb.right - fb.left + 4));
         focus[i].setAttribute("height", String(fb.bottom - fb.top + 3));
-        (focus[i] as SVGElement).style.opacity = String(fade(t, BOX_HOLD));
-        // Underline mark beneath each line of the key sentence
+        focus[i].style.opacity = appear;
         marks[i].setAttribute("x1", String(fb.left - 1));
         marks[i].setAttribute("x2", String(fb.right + 1));
         marks[i].setAttribute("y1", String(fb.bottom + 2));
         marks[i].setAttribute("y2", String(fb.bottom + 2));
-        (marks[i] as SVGElement).style.opacity = String(fade(t, BOX_HOLD));
+        marks[i].style.opacity = appear;
       });
+      if (this.popOpen) this.placePop();
 
+      if (lineGone) return;
+      const lo = t < 220 ? t / 220 : t < LINE_HOLD ? 1 : Math.max(0, 1 - (t - LINE_HOLD) / FADE);
+      if (lo <= 0) {
+        lineGone = true;
+        path.remove();
+        dot.remove();
+        start.remove();
+        return;
+      }
       const fr = from.getBoundingClientRect();
       const sx = fr.right + 3;
       const sy = Math.max(g.view.top + 4, Math.min(g.view.bottom - 4, fr.top + Math.min(11, fr.height / 2)));
@@ -817,41 +891,268 @@ export class OutlineGutter {
       const ey = Math.max(by + 4, Math.min(by + bh - 4, Math.max(g.view.top + 12, Math.min(g.view.bottom - 12, by + Math.min(14, bh / 2)))));
       const dx = Math.max(24, (ex - sx) * 0.5);
       path.setAttribute("d", `M ${sx} ${sy} C ${sx + dx} ${sy}, ${ex - dx} ${ey}, ${ex} ${ey}`);
-      const len = (path as any).getTotalLength?.() || Math.hypot(ex - sx, ey - sy);
       const draw = Math.min(1, t / 420);
       if (draw < 1) {
+        const len = (path as any).getTotalLength?.() || Math.hypot(ex - sx, ey - sy);
         path.setAttribute("stroke-dasharray", `${len} ${len}`);
         path.setAttribute("stroke-dashoffset", String(len * (1 - draw)));
       } else if (path.hasAttribute("stroke-dasharray")) {
-        // Drawn in: solid from here on (the path keeps changing while the PDF scrolls)
         path.removeAttribute("stroke-dasharray");
         path.removeAttribute("stroke-dashoffset");
       }
-      const lo = String(fade(t, LINE_HOLD));
-      (path as SVGElement).style.opacity = lo;
+      path.style.opacity = String(lo);
       start.setAttribute("cx", String(sx));
       start.setAttribute("cy", String(sy));
-      (start as SVGElement).style.opacity = lo;
+      start.style.opacity = String(lo);
       dot.setAttribute("cx", String(ex));
       dot.setAttribute("cy", String(ey));
-      (dot as SVGElement).style.opacity = draw >= 1 ? lo : "0";
-      raf = this.win.requestAnimationFrame(frame);
+      dot.style.opacity = draw >= 1 ? String(lo) : "0";
     };
-    const stop = () => {
-      stopped = true;
-      this.win.cancelAnimationFrame(raf);
-      svg.textContent = "";
-      if (this.guideStop === stop) this.guideStop = null;
+    guide.raf = this.win.requestAnimationFrame(frame);
+  }
+
+  // ------------------------------------------------------------------ viewer events
+
+  /** Keep listeners on the pdf.js window of the current reader (it can be replaced). */
+  private syncViewerListeners(): void {
+    let win: any = null;
+    try {
+      const raw = waive(waive(waive(this.reader?._internalReader)?._primaryView)?._iframeWindow);
+      win = raw ? Components.utils.unwaiveXrays(raw) : null;
+    } catch {
+      win = null;
+    }
+    if (win === this.viewerWin) return;
+    this.detachViewer();
+    if (!win) return;
+    this.viewerWin = win;
+    win.addEventListener("pointerdown", this.onViewerDown, true);
+    win.addEventListener("mousemove", this.onViewerMove, true);
+    win.addEventListener("resize", this.onViewerResize);
+    this.lastViewW = 0;
+    this.keepViewport();
+  }
+
+  private detachViewer(): void {
+    const win = this.viewerWin;
+    this.viewerWin = null;
+    if (!win) return;
+    try {
+      win.removeEventListener("pointerdown", this.onViewerDown, true);
+      win.removeEventListener("mousemove", this.onViewerMove, true);
+      win.removeEventListener("resize", this.onViewerResize);
+    } catch {
+      // window already gone
+    }
+  }
+
+  private inside(b: Box | null, x: number, y: number, m = 0): boolean {
+    return !!b && x >= b.left - m && x <= b.right + m && y >= b.top - m && y <= b.bottom + m;
+  }
+
+  /** Clicking anywhere in the paper outside the highlighted block dismisses the highlight. */
+  private onViewerDown = (e: PointerEvent) => {
+    const gd = this.guide;
+    if (!gd) return;
+    const x = gd.ox + e.clientX;
+    const y = gd.oy + e.clientY;
+    if (!this.inside(gd.box, x, y, 4)) this.cancelGuide();
+  };
+
+  /** Hovering the key sentence offers quick actions. */
+  private onViewerMove = (e: MouseEvent) => {
+    const gd = this.guide;
+    if (!gd || !gd.focus.length || !gd.region.text) return;
+    const x = gd.ox + e.clientX;
+    const y = gd.oy + e.clientY;
+    if (gd.focus.some((b) => this.inside(b, x, y, 3))) this.showPop();
+    else if (this.popOpen) this.hidePop(false);
+  };
+
+  private onViewerResize = () => {
+    if (this.resizeRaf) return;
+    this.resizeRaf = this.win.requestAnimationFrame(() => {
+      this.resizeRaf = 0;
+      this.keepViewport();
+    });
+  };
+
+  // ------------------------------------------------------------------ keep the paper fitted
+
+  /**
+   * When the reading area changes width (outline column, chat panel, window), scale the paper
+   * with it: fit modes (page width / auto) are re-fitted by pdf.js itself; a fixed zoom is
+   * scaled proportionally but never beyond page width, so lines are never cut off. The point
+   * at the vertical centre of the view stays at the centre and the page stays horizontally centred.
+   */
+  private keepViewport(): void {
+    try {
+      const pv = waive(waive(this.reader?._internalReader)?._primaryView);
+      const viewer = waive(waive(waive(pv?._iframeWindow)?.PDFViewerApplication)?.pdfViewer);
+      if (!viewer?.pagesCount) return;
+      const c = waive(viewer.container);
+      const w = c.clientWidth;
+      if (!w) return;
+      if (this.lastViewReader !== this.reader || !this.lastViewW) {
+        this.lastViewReader = this.reader;
+        this.lastViewW = w;
+        return;
+      }
+      if (Math.abs(w - this.lastViewW) < 2) return;
+      const ratio = w / this.lastViewW;
+      this.lastViewW = w;
+      const preset = String(viewer.currentScaleValue);
+      if (preset === "page-width" || preset === "page-fit" || preset === "auto") return;
+      const cur = Number(viewer.currentScale) || 1;
+      const page = waive(viewer.getPageView(viewer.currentPageNumber - 1));
+      const widthAt1 = (Number(page?.width) || 0) / cur;
+      if (!widthAt1) return;
+      const fit = (w - 40) / widthAt1; // same padding pdf.js uses for "page width"
+      const next = Math.max(0.25, Math.min(fit, cur * ratio, 8));
+      if (Math.abs(next - cur) < 0.004) return;
+      // Remember the PDF point at the vertical centre of the view
+      const cy = c.scrollTop + c.clientHeight / 2;
+      let anchor: { idx: number; y: number } | null = null;
+      for (let i = 0; i < viewer.pagesCount; i++) {
+        const div = waive(waive(viewer.getPageView(i)).div);
+        if (cy >= div.offsetTop && cy < div.offsetTop + div.offsetHeight) {
+          const pt = Array.from(waive(waive(waive(viewer.getPageView(i)).viewport).convertToPdfPoint(0, cy - div.offsetTop)) as number[]);
+          anchor = { idx: i, y: pt[1] };
+          break;
+        }
+      }
+      viewer.currentScale = next;
+      if (anchor) {
+        const pv2 = waive(viewer.getPageView(anchor.idx));
+        const vy = (Array.from(waive(waive(pv2.viewport).convertToViewportPoint(0, anchor.y)) as number[]))[1];
+        c.scrollTop = waive(pv2.div).offsetTop + vy - c.clientHeight / 2;
+      }
+      c.scrollLeft = Math.max(0, (c.scrollWidth - c.clientWidth) / 2);
+    } catch (e) {
+      Zotero.debug(`[ZoteroPi] keepViewport: ${e}`);
+    }
+  }
+
+  // ------------------------------------------------------------------ key-sentence actions
+
+  private buildPop(): void {
+    const doc = this.doc;
+    this.pop = h(doc, "div", { class: "zpo-pop", hidden: "true" });
+    this.pop.addEventListener("mouseenter", () => this.showPop());
+    this.pop.addEventListener("mouseleave", () => this.hidePop(false));
+    this.root.append(this.pop);
+  }
+
+  private renderPop(): void {
+    const doc = this.doc;
+    this.pop.textContent = "";
+    const add = (label: string, title: string, fn: (b: HTMLElement) => void, cls = "") => {
+      const b = h(doc, "button", { class: "zpo-pop-btn" + (cls ? ` ${cls}` : ""), text: label, title });
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        fn(b);
+      });
+      this.pop.append(b);
     };
-    this.guideStop = stop;
-    // Let the scroll start (smooth scroll / page render) before the first frame
-    raf = this.win.requestAnimationFrame(frame);
+    this.pop.append(h(doc, "span", { class: "zpo-pop-logo", text: "π" }));
+    for (const a of getSettings().quickActions) {
+      add(a.label, a.mode === "translate" ? "翻译这句话" : a.prompt.slice(0, 80), () => this.runAction(a));
+    }
+    add("问 AI", "把这句话引用到右侧 AI 侧栏，输入你的问题", () => this.askPanel());
+    add("划重点", "把这句话保存为高亮批注", (b) => void this.highlightSentence(b), "zpo-pop-mark");
+  }
+
+  private showPop(): void {
+    clearTimeout(this.popTimer);
+    if (this.popOpen) return;
+    this.renderPop();
+    this.pop.hidden = false;
+    this.popOpen = true;
+    this.placePop();
+  }
+
+  private hidePop(now: boolean): void {
+    clearTimeout(this.popTimer);
+    const hide = () => {
+      this.pop.hidden = true;
+      this.popOpen = false;
+    };
+    if (now) hide();
+    else this.popTimer = setTimeout(hide, 350);
+  }
+
+  /** Below the key sentence (above it if there is no room), inside the reader view. */
+  private placePop(): void {
+    const gd = this.guide;
+    const g = this.geometry();
+    if (!gd || !gd.focus.length || !g) return;
+    const first = gd.focus[0];
+    const last = gd.focus[gd.focus.length - 1];
+    const pw = this.pop.offsetWidth || 260;
+    const ph = this.pop.offsetHeight || 30;
+    let left = Math.min(last.right - pw, g.view.right - pw - 8);
+    left = Math.max(g.view.left + 8, Math.max(left, Math.min(first.left, last.left)));
+    let top = last.bottom + 8;
+    if (top + ph > g.view.bottom - 6) top = first.top - ph - 8;
+    this.pop.style.left = `${Math.round(left)}px`;
+    this.pop.style.top = `${Math.round(top)}px`;
+  }
+
+  private selectionOf(region: AnchorRegion): Selection | null {
+    if (!region.text || !region.focus.length) return null;
+    return { text: region.text, position: { pageIndex: region.pageIndex, rects: region.focus }, pageLabel: String(region.pageIndex + 1) };
+  }
+
+  private popAnchor(): DOMRect | null {
+    const r = this.pop.getBoundingClientRect();
+    return new this.win.DOMRect(r.left, r.top, r.width, r.height);
+  }
+
+  private runAction(a: QuickAction): void {
+    const sel = this.guide && this.selectionOf(this.guide.region);
+    if (!sel || !this.reader) return;
+    const anchor = this.popAnchor();
+    this.hidePop(true);
+    this.host.runQuickAction(this.reader, a, sel, anchor);
+  }
+
+  private askPanel(): void {
+    const sel = this.guide && this.selectionOf(this.guide.region);
+    if (!sel) return;
+    this.hidePop(true);
+    this.host.askInPanel(sel.text, sel.pageLabel || "");
+  }
+
+  private async highlightSentence(btn: HTMLElement): Promise<void> {
+    const gd = this.guide;
+    const region = gd?.region;
+    if (!region?.text || !region.viewBox || region.start === undefined || !this.reader) return;
+    btn.setAttribute("disabled", "true");
+    btn.textContent = "标注中…";
+    try {
+      const attachment = Zotero.Items.get(this.reader.itemID);
+      await saveRegionHighlight(attachment, {
+        pageIndex: region.pageIndex,
+        rects: region.focus,
+        text: region.text,
+        start: region.start,
+        viewBox: region.viewBox,
+        pageLabel: await getPageLabel(this.reader, region.pageIndex),
+      });
+      btn.textContent = "✓ 已划重点";
+    } catch (e: any) {
+      Zotero.logError(e);
+      btn.textContent = "标注失败";
+      btn.removeAttribute("disabled");
+    }
   }
 
   // ------------------------------------------------------------------ teardown
 
   destroy(): void {
     clearInterval(this.timer);
+    clearTimeout(this.popTimer);
+    this.detachViewer();
     this.releaseAll();
     this.cancelGuide();
     for (const u of this.unsubs) u();

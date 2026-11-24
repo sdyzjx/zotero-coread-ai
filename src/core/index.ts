@@ -90,7 +90,13 @@ class ZoteroPiAddon {
         this.card?.close();
       },
     );
-    this.gutter = new OutlineGutter(win, this.outline, this.context);
+    this.gutter = new OutlineGutter(win, this.outline, this.context, {
+      runQuickAction: (reader, action, sel, anchor) => this.runQuickAction(reader, action, sel, anchor),
+      askInPanel: (text, pageLabel) => {
+        this.panel?.show();
+        this.panel?.postToFrame({ type: "zoteropi-insert-quote", text, pageLabel });
+      },
+    });
     this.addMenu(win);
     win.addEventListener("keydown", this.onKey, true);
   }
@@ -261,7 +267,12 @@ class ZoteroPiAddon {
       return;
     }
     const a = action === "ask" ? ({ id: "ask", label: "问 AI", mode: "ask", prompt: "" } as const) : action;
-    this.card?.open(`${a.label} · π`, anchor ? { left: anchor.left, top: anchor.top, bottom: anchor.bottom } : null);
+    // Translations get a card sized to the text instead of the remembered chat-card size
+    this.card?.open(
+      `${a.label} · π`,
+      anchor ? { left: anchor.left, top: anchor.top, bottom: anchor.bottom } : null,
+      a.mode === "translate" ? { fitText: sel.text.length } : undefined,
+    );
     void this.quick.start(a as any, reader.itemID, sel).catch((e) => Zotero.logError(e));
   }
 }

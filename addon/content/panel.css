@@ -183,6 +183,7 @@
 }
 
 .zp-card { min-width: 300px; min-height: 180px; border-bottom-right-radius: 3px; }
+.zp-card.zp-card-fit { min-width: 240px; min-height: 96px; }
 .zp-card .zp-shield { inset: 28px 0 0 0; }
 .zp-card .zp-header { height: 28px; }
 

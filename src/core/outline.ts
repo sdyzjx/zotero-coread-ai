@@ -19,6 +19,7 @@ import {
 import { figureRegion, paragraphRange, unionRects, type Rect } from "./outline-geometry";
 import { getItem, getMainAttachment, getPaperText, paperKey, paperMetadata, type PaperRef } from "./paper";
 import { getPageData } from "./reader-utils";
+import { charsText } from "./annotate";
 import { kvDelete, kvGet, kvSet } from "./store";
 import { buildCharIndex, findQuote, getRangeRects } from "./text";
 
@@ -197,6 +198,10 @@ export interface AnchorRegion {
   box: Rect | null;
   /** Finer rects to emphasise inside the box (the quoted lines). */
   focus: Rect[];
+  /** Text of the focus rects, its first char index on the page, and the page viewBox. */
+  text?: string;
+  start?: number;
+  viewBox?: number[];
 }
 
 const regionCache = new WeakMap<any, Map<string, AnchorRegion>>();
@@ -226,7 +231,14 @@ export async function resolveAnchor(reader: any, anchor: OutlineAnchor): Promise
         if (m) {
           const [ps, pe] = paragraphRange(chars, m[0], m[1]);
           const lines = getRangeRects(chars, ps, pe);
-          region = { pageIndex, box: unionRects(lines), focus: getRangeRects(chars, m[0], m[1]) };
+          region = {
+            pageIndex,
+            box: unionRects(lines),
+            focus: getRangeRects(chars, m[0], m[1]),
+            text: charsText(chars, m[0], m[1]),
+            start: m[0],
+            viewBox: data.viewBox,
+          };
         }
       }
     }

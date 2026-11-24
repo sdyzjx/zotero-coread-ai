@@ -530,6 +530,66 @@
   100% { background-position: -100% 0; }
 }
 
+/* ---------------------------------------------------------------- key-sentence actions */
+.zpo-pop[hidden] {
+  display: none !important;
+}
+.zpo-pop {
+  position: fixed;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px;
+  border-radius: 8px;
+  background: var(--zpo-bg-solid);
+  border: 1px solid var(--zpo-line);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+  white-space: nowrap;
+  animation: zpo-pop-in 0.12s ease-out;
+}
+@keyframes zpo-pop-in {
+  from { opacity: 0; transform: translateY(-3px); }
+}
+.zpo-pop-logo {
+  width: 15px;
+  height: 15px;
+  margin: 0 3px 0 2px;
+  border-radius: 4px;
+  background: var(--zpo-accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 9.5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.zpo-pop-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--zpo-fg);
+  font: inherit;
+  font-size: 12px;
+  line-height: 22px;
+  padding: 0 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.zpo-pop-btn:hover:not([disabled]) {
+  background: var(--zpo-accent-soft);
+  color: var(--zpo-accent);
+}
+.zpo-pop-btn[disabled] {
+  color: var(--zpo-muted);
+  cursor: default;
+}
+.zpo-pop-mark {
+  border-left: 1px solid var(--zpo-line);
+  border-radius: 0 5px 5px 0;
+  margin-left: 2px;
+}
+
 /* ---------------------------------------------------------------- pill */
 .zpo-pill {
   position: fixed;
