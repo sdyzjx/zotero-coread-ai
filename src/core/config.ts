@@ -34,6 +34,14 @@ export interface Settings {
   annotationColor: string;
   annotationTag: string;
   autoConclusion: boolean;
+  /** Model for outline analysis ("" = quick model). */
+  outlineModel: string;
+  /** Thinking level for outline analysis (falls back to the next lower level the model supports). */
+  outlineThinking: string;
+  /** Outline navigator expanded (false = collapsed to the edge tab). */
+  outlineVisible: boolean;
+  /** Outline column width in px (the PDF view shrinks by this much). */
+  outlineWidth: number;
   quickActions: QuickAction[];
 }
 
@@ -56,6 +64,10 @@ const DEFAULTS: Omit<Settings, "quickActions"> = {
   annotationColor: "#a28ae5",
   annotationTag: "AI",
   autoConclusion: true,
+  outlineModel: "",
+  outlineThinking: "medium",
+  outlineVisible: true,
+  outlineWidth: 300,
 };
 
 export function getPref<T = any>(key: string): T {

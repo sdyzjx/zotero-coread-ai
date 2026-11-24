@@ -9,6 +9,7 @@ import { getModel, streamSimple } from "./llm";
 import { getItem, paperTitle, refFromItem, type PaperRef } from "./paper";
 import type { SessionManager } from "./sessions";
 import { resolveColor, saveSelectionAsHighlight } from "./annotate";
+import { markdownToComment } from "../shared/note-format";
 import type { RenderedRegion } from "./vision";
 import { toImageContent } from "./vision";
 
@@ -78,8 +79,17 @@ export class QuickService {
     this.changes.emit({ ...this.job });
   }
 
+  /**
+   * Stop the running job without announcing "no job": the card for the new job is already
+   * open, and a null event would close it (the 2nd quick action showed nothing).
+   */
+  private abortCurrent(): void {
+    this.abortCtrl?.abort();
+    this.abortCtrl = null;
+  }
+
   async start(action: QuickAction | { id: "ask"; label: string; mode: "ask"; prompt: "" }, attachmentID: number, selection: Selection): Promise<QuickJob | null> {
-    this.cancel();
+    this.abortCurrent();
     const att = Zotero.Items.get(attachmentID);
     const paper = att && refFromItem(att);
     if (!paper) return null;
@@ -102,7 +112,7 @@ export class QuickService {
 
   /** 框图 / image annotation: show the image with action choices. */
   startImage(attachmentID: number, image: RenderedRegion, annotationKey?: string): QuickJob | null {
-    this.cancel();
+    this.abortCurrent();
     const att = Zotero.Items.get(attachmentID);
     const paper = att && refFromItem(att);
     if (!paper) return null;
@@ -199,7 +209,9 @@ export class QuickService {
   }
 
   /** Save the selection as a highlight with the given comment (e.g. the translation). */
-  async saveAsAnnotation(comment: string): Promise<string | null> {
+  async saveAsAnnotation(markdown: string): Promise<string | null> {
+    // Zotero comments only render b / i / sub / sup: convert markdown + LaTeX
+    const comment = markdownToComment(markdown);
     const job = this.job;
     if (!job) return null;
     const att = Zotero.Items.get(job.attachmentID);

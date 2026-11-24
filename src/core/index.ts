@@ -1,4 +1,5 @@
 import "./polyfill-install";
+import { disposePolyfills, installPolyfills } from "./polyfill";
 import { getSettings, saveSettings, type QuickAction, type Settings } from "./config";
 import { ContextTracker } from "./context";
 import { globalEvents } from "./events";
@@ -9,6 +10,8 @@ import { ensureReader, navigateToPage, selectReaderTab } from "./reader-utils";
 import { SessionManager } from "./sessions";
 import { closeStore, openStore } from "./store";
 import { ChatPanel } from "./ui/panel";
+import { OutlineService } from "./outline";
+import { OutlineGutter } from "./ui/outline-gutter";
 import { QuickCard } from "./ui/quickcard";
 import { injectToolbarIntoOpenReaders, registerReaderHooks, removeToolbarFromReaders } from "./ui/reader-hooks";
 import { registerDevEndpoint, unregisterDevEndpoint } from "./dev";
@@ -23,7 +26,9 @@ class ZoteroPiAddon {
   readonly sessions = new SessionManager();
   readonly context = new ContextTracker();
   readonly quick = new QuickService(this.sessions);
+  readonly outline = new OutlineService();
   panel: ChatPanel | null = null;
+  gutter: OutlineGutter | null = null;
   card: QuickCard | null = null;
   private win: any = null;
   private menuItems: Element[] = [];
@@ -72,6 +77,7 @@ class ZoteroPiAddon {
     if (this.win === win) return;
     if (this.win) this.onMainWindowUnload(this.win);
     this.win = win;
+    installPolyfills(win); // fills anything still missing if no other source window existed
     this.panel = new ChatPanel(win);
     this.panel.setTitle(this.context.get()?.title || "Pi Agent");
     this.card = new QuickCard(
@@ -84,6 +90,13 @@ class ZoteroPiAddon {
         this.card?.close();
       },
     );
+    this.gutter = new OutlineGutter(win, this.outline, this.context, {
+      runQuickAction: (reader, action, sel, anchor) => this.runQuickAction(reader, action, sel, anchor),
+      askInPanel: (text, pageLabel) => {
+        this.panel?.show();
+        this.panel?.postToFrame({ type: "zoteropi-insert-quote", text, pageLabel });
+      },
+    });
     this.addMenu(win);
     win.addEventListener("keydown", this.onKey, true);
   }
@@ -93,6 +106,8 @@ class ZoteroPiAddon {
     win.removeEventListener("keydown", this.onKey, true);
     this.panel?.destroy();
     this.card?.destroy();
+    this.gutter?.destroy();
+    this.gutter = null;
     for (const m of this.menuItems) m.remove();
     this.menuItems = [];
     this.panel = null;
@@ -107,11 +122,14 @@ class ZoteroPiAddon {
     const toggle = win.document.createXULElement("menuitem");
     toggle.setAttribute("label", "Pi Agent 聊天面板");
     toggle.addEventListener("command", () => this.togglePanel());
+    const outline = win.document.createXULElement("menuitem");
+    outline.setAttribute("label", "Pi Agent 文章脉络");
+    outline.addEventListener("command", () => this.toggleOutline());
     const settings = win.document.createXULElement("menuitem");
     settings.setAttribute("label", "Pi Agent 设置…");
     settings.addEventListener("command", () => this.openSettings());
-    popup.append(sep, toggle, settings);
-    this.menuItems = [sep, toggle, settings];
+    popup.append(sep, toggle, outline, settings);
+    this.menuItems = [sep, toggle, outline, settings];
   }
 
   async shutdown(): Promise<void> {
@@ -123,12 +141,14 @@ class ZoteroPiAddon {
       Zotero.logError(e);
     }
     this.quick.cancel();
+    this.outline.dispose();
     this.context.stop();
     if (this.win) this.onMainWindowUnload(this.win);
     this.sessions.dispose();
     globalEvents.clear();
     for (const w of Services.wm.getEnumerator("zoteropi:settings")) w.close();
     if (__DEV__) unregisterDevEndpoint();
+    disposePolyfills();
     await closeStore();
   }
 
@@ -158,6 +178,10 @@ class ZoteroPiAddon {
 
   togglePanel(): void {
     this.panel?.toggle();
+  }
+
+  toggleOutline(): void {
+    this.gutter?.toggle();
   }
 
   openSettings(): void {
@@ -243,7 +267,12 @@ class ZoteroPiAddon {
       return;
     }
     const a = action === "ask" ? ({ id: "ask", label: "问 AI", mode: "ask", prompt: "" } as const) : action;
-    this.card?.open(`${a.label} · π`, anchor ? { left: anchor.left, top: anchor.top, bottom: anchor.bottom } : null);
+    // Translations get a card sized to the text instead of the remembered chat-card size
+    this.card?.open(
+      `${a.label} · π`,
+      anchor ? { left: anchor.left, top: anchor.top, bottom: anchor.bottom } : null,
+      a.mode === "translate" ? { fitText: sel.text.length } : undefined,
+    );
     void this.quick.start(a as any, reader.itemID, sel).catch((e) => Zotero.logError(e));
   }
 }

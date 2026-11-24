@@ -114,6 +114,51 @@ export async function completeText(
     .join("");
 }
 
+/**
+ * Thinking level for a model, falling back to the nearest LOWER supported level (then higher),
+ * so e.g. "medium" on DeepSeek Flash (low / high / max only) runs as "low", not "high".
+ */
+export function pickThinking(model: Model<Api>, level: string): string | undefined {
+  if (!level || level === "off") return undefined;
+  const levels = thinkingLevelsOf(model);
+  if (levels.includes(level)) return level;
+  const order = ["minimal", "low", "medium", "high", "xhigh", "max"];
+  const idx = order.indexOf(level);
+  for (let j = idx - 1; j >= 0; j--) if (levels.includes(order[j])) return order[j];
+  for (let j = idx + 1; j < order.length; j++) if (levels.includes(order[j])) return order[j];
+  return undefined;
+}
+
+/** Stream a completion; `onEvent` sees thinking / text progress. Returns the full text. */
+export async function streamText(
+  context: Context,
+  opts: { model?: string; reasoning?: string; signal?: AbortSignal; maxTokens?: number },
+  onEvent: (e: { type: "thinking" | "text"; text: string; thinking: string }) => void,
+): Promise<string> {
+  const model = getModel(opts.model || getSettings().quickModel);
+  const stream = models.streamSimple(model, context, {
+    apiKey: requireApiKey(),
+    reasoning: opts.reasoning as any,
+    signal: opts.signal,
+    maxTokens: opts.maxTokens,
+  });
+  let text = "";
+  let thinking = "";
+  for await (const ev of stream as any) {
+    if (ev.type === "text_delta") {
+      text += ev.delta;
+      onEvent({ type: "text", text, thinking });
+    } else if (ev.type === "thinking_delta") {
+      thinking += ev.delta;
+      onEvent({ type: "thinking", text, thinking });
+    } else if (ev.type === "error") {
+      throw new Error(ev.error?.errorMessage || "请求失败");
+    }
+  }
+  if (opts.signal?.aborted) throw new Error("aborted");
+  return text;
+}
+
 /** Check credentials and list models available on the account. */
 export async function testConnection(): Promise<{ ok: boolean; message: string; remoteModels: string[] }> {
   const settings = getSettings();

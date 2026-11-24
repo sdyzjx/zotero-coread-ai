@@ -13,7 +13,7 @@
       "id": "zotero-pi-agent@zoteropi.local",
       "update_url": "https://localhost/zotero-pi-agent/updates.json",
       "strict_min_version": "7.0",
-      "strict_max_version": "9.*"
+      "strict_max_version": "10.*"
     }
   }
 }

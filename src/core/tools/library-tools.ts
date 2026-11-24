@@ -4,6 +4,7 @@
  */
 import { Type } from "@earendil-works/pi-ai";
 import { createMarkdown, zoteroNoteMath } from "../../shared/markdown";
+import { NOTE_LIMIT, normalizeNoteMarkdown, noteProblems } from "../../shared/note-format";
 import { creatorsString, getItem, paperTitle, topLevelItem } from "../paper";
 import * as store from "../store";
 import { clip, ok, tool, type Tool, type ToolContext } from "./common";
@@ -163,16 +164,21 @@ export function libraryTools(ctx: ToolContext): Tool[] {
     name: "create_zotero_note",
     label: "创建笔记",
     description:
-      "Create a Zotero child note attached to a paper (default: current paper) from markdown (LaTeX math allowed). Use only when the user asks to save notes/summaries.",
+      `Create a Zotero child note attached to a paper (default: current paper) from markdown. Use only when the user asks to save notes/summaries. The note editor renders headings, bold/italic, lists, simple tables, code and LaTeX math ($…$ inline, $$…$$ display). Keep notes focused and skimmable: ≤ ${NOTE_LIMIT} characters, headings ## / ### only (the title becomes the top heading), lists ≤ 2 levels, ≤ 2 small tables, no mermaid, no raw HTML. Prefer key points over full prose.`,
     parameters: Type.Object({
-      markdown: Type.String(),
+      markdown: Type.String({ description: "Note body in markdown" }),
       title: Type.Optional(Type.String()),
       item_key: Type.Optional(Type.String()),
     }),
     async execute(_id, p) {
       const parent = p.item_key ? resolvePaperItem(ctx, p.item_key) : getItem(ctx.paper);
       if (!parent || parent.isAttachment()) throw new Error("无法在该条目下创建子笔记");
-      const html = (p.title ? `<h1>${noteMd.utils.escapeHtml(p.title)}</h1>\n` : "") + noteMd.render(p.markdown);
+      const markdown = normalizeNoteMarkdown(p.markdown);
+      const problems = noteProblems(markdown);
+      if (problems.length) {
+        throw new Error(`Note rejected as too complex: ${problems.join("; ")}. Simplify it and call create_zotero_note again.`);
+      }
+      const html = (p.title ? `<h1>${noteMd.utils.escapeHtml(p.title)}</h1>\n` : "") + noteMd.render(markdown);
       const note = new Zotero.Item("note");
       note.libraryID = parent.libraryID;
       note.parentID = parent.id;

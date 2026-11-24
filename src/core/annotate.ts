@@ -5,6 +5,7 @@ import { getSettings } from "./config";
 import { getMainAttachment } from "./paper";
 import { ensureReader, getPageCount, getPageData, getPageLabel, getCurrentPageIndex } from "./reader-utils";
 import { buildCharIndex, findQuote, getRangeRects, type PdfChar } from "./text";
+import { markdownToComment } from "../shared/note-format";
 
 const COLORS: Record<string, string> = {
   yellow: "#ffd400",
@@ -88,7 +89,7 @@ async function locate(item: any, quote: string, page?: number): Promise<Located>
   );
 }
 
-function charsText(chars: PdfChar[], start: number, end: number): string {
+export function charsText(chars: PdfChar[], start: number, end: number): string {
   let s = "";
   for (let i = start; i <= end; i++) {
     const ch = chars[i];
@@ -120,7 +121,7 @@ export async function createHighlight(
     key: Zotero.DataObjectUtilities.generateKey(),
     type: opts.type === "underline" ? "underline" : "highlight",
     text,
-    comment: opts.comment || "",
+    comment: markdownToComment(opts.comment || ""),
     color: resolveColor(opts.color),
     pageLabel,
     sortIndex: sortIndex(loc.pageIndex, loc.start, pageHeight - top),
@@ -174,7 +175,7 @@ export async function createNoteAnnotation(
   const json = {
     key: Zotero.DataObjectUtilities.generateKey(),
     type: "note",
-    comment: opts.comment,
+    comment: markdownToComment(opts.comment),
     color: resolveColor(opts.color),
     pageLabel,
     sortIndex: sortIndex(pageIndex, offset, viewBox[3] - viewBox[1] - rect[3]),
@@ -183,6 +184,28 @@ export async function createNoteAnnotation(
   };
   await Zotero.Annotations.saveFromJSON(attachment, json);
   return { key: json.key, pageLabel, pageIndex, text: "", attachmentID: attachment.id };
+}
+
+/** Highlight an already-located passage (e.g. the key sentence of an outline jump). */
+export async function saveRegionHighlight(
+  attachment: any,
+  r: { pageIndex: number; rects: number[][]; text: string; start: number; viewBox: number[]; pageLabel: string },
+  color?: string,
+): Promise<string> {
+  const top = r.rects.reduce((m, x) => Math.max(m, x[3]), -Infinity);
+  const json = {
+    key: Zotero.DataObjectUtilities.generateKey(),
+    type: "highlight",
+    text: r.text,
+    comment: "",
+    color: resolveColor(color),
+    pageLabel: r.pageLabel,
+    sortIndex: sortIndex(r.pageIndex, r.start, r.viewBox[3] - r.viewBox[1] - top),
+    position: { pageIndex: r.pageIndex, rects: r.rects },
+    tags: aiTags(),
+  };
+  await Zotero.Annotations.saveFromJSON(attachment, json);
+  return json.key;
 }
 
 /** Save the user's current text selection (from the reader popup) as a highlight. */
@@ -211,6 +234,7 @@ export async function saveSelectionAsHighlight(
 export async function updateAnnotationComment(libraryID: number, key: string, comment: string, mode: "replace" | "append"): Promise<void> {
   const ann = Zotero.Items.getByLibraryAndKey(libraryID, key);
   if (!ann || !ann.isAnnotation()) throw new Error(`找不到批注 ${key}`);
-  ann.annotationComment = mode === "append" && ann.annotationComment ? `${ann.annotationComment}\n\n${comment}` : comment;
+  const formatted = markdownToComment(comment);
+  ann.annotationComment = mode === "append" && ann.annotationComment ? `${ann.annotationComment}\n\n${formatted}` : formatted;
   await ann.saveTx();
 }

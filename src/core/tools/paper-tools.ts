@@ -14,6 +14,8 @@ import {
 } from "../paper";
 import { findReader, getCurrentPageIndex } from "../reader-utils";
 import { listSessionsForPaper } from "../store";
+import { loadCachedOutline } from "../outline";
+import { outlineToMarkdown } from "../outline-schema";
 import { searchPages, sliceWithHint } from "../text";
 import { clip, ok, parsePages, tool, type Tool, type ToolContext } from "./common";
 
@@ -53,6 +55,10 @@ export function paperTools(ctx: ToolContext): Tool[] {
         for (const h of text.headings.slice(0, 80)) lines.push(`- ${h.title} — p.${h.page + 1}`);
       } else if (text.source !== "none") {
         lines.push("", "No section headings detected; use paper_search or read by pages.");
+      }
+      const outline = await loadCachedOutline({ libraryID: item.libraryID, itemKey: item.key });
+      if (outline) {
+        lines.push("", "Paper outline (文章脉络, AI-generated, shown to the user next to the PDF):", clip(outlineToMarkdown(outline), 4000));
       }
       lines.push("", `annotations: ${anns.length}; AI chat sessions about this paper: ${sessions.length}`);
       return ok(lines.join("\n"), { pages: text.totalPages, headings: text.headings.length });
