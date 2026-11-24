@@ -21,7 +21,8 @@ const common = {
   sourcemap: dev ? "inline" : false,
   minify: !dev,
   legalComments: "none",
-  define: { __DEV__: JSON.stringify(dev) },
+  // __BUILD_ID__ busts the chrome stylesheet cache when the plugin is updated in place
+  define: { __DEV__: JSON.stringify(dev), __BUILD_ID__: JSON.stringify(Date.now().toString(36)) },
   logLevel: "warning",
 };
 

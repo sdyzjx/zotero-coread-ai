@@ -57,7 +57,18 @@ export interface SectionDef {
   hint: string;
 }
 
+/** Role labels for the abstract breakdown (children of the "abstract" section use these as titles). */
+export const ABSTRACT_ROLES = {
+  research: ["背景", "问题", "已有方法", "Gap", "方法", "实验", "结果", "结论"],
+  survey: ["领域", "动机", "范围", "分类框架", "主要发现", "挑战与展望"],
+};
+
 export const RESEARCH_SECTIONS: SectionDef[] = [
+  {
+    key: "abstract",
+    title: "摘要拆解",
+    hint: `the abstract broken down in the same logic — one child per role the abstract covers, in order, child title EXACTLY one of: ${ABSTRACT_ROLES.research.join(" / ")}; summary paraphrases that part; anchor quotes the matching abstract sentence verbatim`,
+  },
   { key: "background", title: "任务背景", hint: "the task / problem setting and why it matters" },
   { key: "traditional", title: "传统方法及问题", hint: "classic / earlier approaches and their shortcomings" },
   {
@@ -73,6 +84,11 @@ export const RESEARCH_SECTIONS: SectionDef[] = [
 ];
 
 export const SURVEY_SECTIONS: SectionDef[] = [
+  {
+    key: "abstract",
+    title: "摘要拆解",
+    hint: `the abstract broken down — one child per role the abstract covers, in order, child title EXACTLY one of: ${ABSTRACT_ROLES.survey.join(" / ")}; summary paraphrases that part; anchor quotes the matching abstract sentence verbatim`,
+  },
   { key: "scope", title: "领域与范围", hint: "the field, scope of the survey, and how it organizes the literature (taxonomy criteria)" },
   {
     key: "evolution",
@@ -168,6 +184,9 @@ type ∈ "evolves" (A develops into B), "improves" (B fixes a weakness of A), "c
 - title: ≤ 12 characters (CJK) or ≤ 5 words. summary: ONE sentence, ≤ 40 CJK characters or ≤ 25 words, concrete (numbers, names), no filler.
 - Depth ≤ 3 levels (section → child → grandchild). ≤ 6 children per node. A section may have no children if one summary suffices.
 - Results: include the key numbers (e.g. "成功率 72.1% vs 58.3%").
+
+## The "abstract" section
+Split the paper's abstract (as printed in the PDF) sentence by sentence into those roles. Every child has exactly one anchor quoting its abstract sentence, so clicking it highlights that sentence. A sentence covering two roles goes to the more important one; don't invent roles the abstract doesn't state.
 
 ## Anchors — every node needs 1–3 anchors pointing into the paper
 - {"page": N, "quote": "..."} — N is the page number from the <<<PAGE N>>> markers; quote is copied VERBATIM from that page (8–20 consecutive words, a single sentence fragment, no ellipsis, not translated, no LaTeX).

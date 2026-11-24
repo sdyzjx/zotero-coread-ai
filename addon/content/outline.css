@@ -320,6 +320,22 @@
   font-size: 11px;
 }
 
+/* abstract breakdown: role-coloured titles with a dot */
+.zpo-node[data-section="abstract"].zpo-d1 > .zpo-row .zpo-title-text {
+  color: color-mix(in srgb, var(--role) 85%, var(--zpo-fg));
+  font-weight: 600;
+}
+.zpo-node[data-section="abstract"].zpo-d1 > .zpo-row .zpo-num {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--role);
+  color: transparent;
+  font-size: 0;
+  align-self: center;
+  opacity: 0.8;
+}
+
 /* survey timeline */
 .zpo-node[data-section="evolution"].zpo-d0 > .zpo-children {
   border-left-style: dashed;
@@ -580,9 +596,16 @@
   stroke-opacity: 0.42;
   stroke-width: 1.4;
 }
+/* The key sentence: clearly marked (tint + underline), the rest of the box stays soft */
 .zpo-guide-focus {
   fill: var(--zpo-accent);
-  fill-opacity: 0.1;
+  fill-opacity: 0.2;
+}
+.zpo-guide-mark {
+  stroke: var(--zpo-accent);
+  stroke-opacity: 0.75;
+  stroke-width: 2;
+  stroke-linecap: round;
 }
 .zpo-guide-line {
   fill: none;

@@ -22,6 +22,7 @@ const MAX_W = 640;
 const MIN_PDF_W = 380;
 
 const SECTION_COLORS: Record<string, string> = {
+  abstract: "#8a8f98",
   background: "#7c8db5",
   traditional: "#a08c7a",
   related: "#4f9a9c",
@@ -35,6 +36,24 @@ const SECTION_COLORS: Record<string, string> = {
   taxonomy: "#6d5bd0",
   comparison: "#c49a1f",
   challenges: "#d0695f",
+};
+
+/** Abstract roles reuse the colour of the matching outline section. */
+const ROLE_COLORS: Record<string, string> = {
+  背景: SECTION_COLORS.background,
+  问题: SECTION_COLORS.traditional,
+  已有方法: SECTION_COLORS.related,
+  Gap: SECTION_COLORS.gap,
+  方法: SECTION_COLORS.method,
+  实验: SECTION_COLORS.experiment,
+  结果: SECTION_COLORS.results,
+  结论: SECTION_COLORS.conclusion,
+  领域: SECTION_COLORS.scope,
+  动机: SECTION_COLORS.background,
+  范围: SECTION_COLORS.scope,
+  分类框架: SECTION_COLORS.taxonomy,
+  主要发现: SECTION_COLORS.comparison,
+  挑战与展望: SECTION_COLORS.challenges,
 };
 
 interface Box {
@@ -453,6 +472,7 @@ export class OutlineGutter {
       "data-section": section,
     });
     if (depth === 0) el.setAttribute("style", `--sec: ${SECTION_COLORS[section] || "#6d5bd0"}`);
+    else if (section === "abstract" && depth === 1) el.setAttribute("style", `--role: ${ROLE_COLORS[n.title] || "#8a8f98"}`);
 
     const twisty = h(doc, "span", { class: "zpo-twisty", text: hasKids ? "›" : "" });
     twisty.addEventListener("click", (e) => {
@@ -734,10 +754,11 @@ export class OutlineGutter {
     const group = mk("g", { "clip-path": `url(#${clipId})` });
     const box = mk("rect", { class: "zpo-guide-box", rx: "6", ry: "6" });
     const focus = region.focus.slice(0, 12).map(() => mk("rect", { class: "zpo-guide-focus", rx: "2", ry: "2" }));
+    const marks = region.focus.slice(0, 12).map(() => mk("line", { class: "zpo-guide-mark" }));
     const path = mk("path", { class: "zpo-guide-line" });
     const dot = mk("circle", { class: "zpo-guide-dot", r: "3" });
     const start = mk("circle", { class: "zpo-guide-start", r: "2.5" });
-    group.append(box, ...focus, path, dot, start);
+    group.append(box, ...focus, ...marks, path, dot, start);
     svg.append(defs, group);
 
     const t0 = this.win.performance.now();
@@ -776,11 +797,17 @@ export class OutlineGutter {
       region.focus.slice(0, 12).forEach((r, i) => {
         const fb = this.regionBox(g, region, r);
         if (!fb) return;
-        focus[i].setAttribute("x", String(fb.left - 1));
-        focus[i].setAttribute("y", String(fb.top - 1));
-        focus[i].setAttribute("width", String(fb.right - fb.left + 2));
-        focus[i].setAttribute("height", String(fb.bottom - fb.top + 2));
+        focus[i].setAttribute("x", String(fb.left - 2));
+        focus[i].setAttribute("y", String(fb.top - 1.5));
+        focus[i].setAttribute("width", String(fb.right - fb.left + 4));
+        focus[i].setAttribute("height", String(fb.bottom - fb.top + 3));
         (focus[i] as SVGElement).style.opacity = String(fade(t, BOX_HOLD));
+        // Underline mark beneath each line of the key sentence
+        marks[i].setAttribute("x1", String(fb.left - 1));
+        marks[i].setAttribute("x2", String(fb.right + 1));
+        marks[i].setAttribute("y1", String(fb.bottom + 2));
+        marks[i].setAttribute("y2", String(fb.bottom + 2));
+        (marks[i] as SVGElement).style.opacity = String(fade(t, BOX_HOLD));
       });
 
       const fr = from.getBoundingClientRect();
@@ -792,8 +819,14 @@ export class OutlineGutter {
       path.setAttribute("d", `M ${sx} ${sy} C ${sx + dx} ${sy}, ${ex - dx} ${ey}, ${ex} ${ey}`);
       const len = (path as any).getTotalLength?.() || Math.hypot(ex - sx, ey - sy);
       const draw = Math.min(1, t / 420);
-      path.setAttribute("stroke-dasharray", `${len} ${len}`);
-      path.setAttribute("stroke-dashoffset", String(len * (1 - draw)));
+      if (draw < 1) {
+        path.setAttribute("stroke-dasharray", `${len} ${len}`);
+        path.setAttribute("stroke-dashoffset", String(len * (1 - draw)));
+      } else if (path.hasAttribute("stroke-dasharray")) {
+        // Drawn in: solid from here on (the path keeps changing while the PDF scrolls)
+        path.removeAttribute("stroke-dasharray");
+        path.removeAttribute("stroke-dashoffset");
+      }
       const lo = String(fade(t, LINE_HOLD));
       (path as SVGElement).style.opacity = lo;
       start.setAttribute("cx", String(sx));

@@ -12,7 +12,9 @@ export function h(doc: Document, tag: string, attrs: Record<string, string> = {}
 
 export function ensureStylesheet(doc: Document, id = "zoteropi-css", href = "chrome://zoteropi/content/panel.css"): void {
   if (doc.getElementById(id)) return;
-  const link = h(doc, "link", { id, rel: "stylesheet", href });
+  // Versioned URL: the document caches sheets by URL, so an in-place plugin update would
+  // otherwise keep showing the previous stylesheet until Zotero restarts.
+  const link = h(doc, "link", { id, rel: "stylesheet", href: `${href}?v=${__BUILD_ID__}` });
   doc.documentElement.appendChild(link);
 }
 

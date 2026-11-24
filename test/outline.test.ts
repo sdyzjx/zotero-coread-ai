@@ -194,3 +194,15 @@ test("figureRegion for tables walks downward", () => {
   assert.ok(r[1] >= 600 && r[1] <= 604, `bottom ${r[1]} above next prose line top (600)`);
   assert.ok(r[3] >= 690, `top ${r[3]} includes caption`);
 });
+
+test("abstract breakdown is the first section for both kinds", () => {
+  for (const kind of ["research", "survey"]) {
+    const o = normalizeOutline(
+      { kind, sections: [{ key: "conclusion", summary: "c" }, { key: "abstract", summary: "a", children: [{ title: "背景", summary: "b", anchors: [{ page: 1, quote: "We study robot policies" }] }] }] },
+      3,
+    );
+    assert.equal(o.sections[0].key, "abstract");
+    assert.equal(o.sections[0].title, "摘要拆解");
+    assert.equal(o.sections[0].children[0].title, "背景");
+  }
+});
