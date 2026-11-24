@@ -3,7 +3,11 @@ import { disposePolyfills, installPolyfills } from "./polyfill";
 import { getSettings, saveSettings, type QuickAction, type Settings } from "./config";
 import { ContextTracker } from "./context";
 import { globalEvents } from "./events";
-import { listModels, testConnection } from "./llm";
+import { listModels, testConnection, testModel } from "./llm";
+import { agyPluginStatus, installAgyPlugin, uninstallAgyPlugin } from "./agents/agy";
+import { detectCli } from "./agents/runner";
+import type { CliProviderId } from "./agents/providers";
+import * as workspaces from "./agents/workspace";
 import { getItem, getMainAttachment, type PaperRef } from "./paper";
 import { IMAGE_ACTIONS, QuickService, type Selection } from "./quick";
 import { ensureReader, navigateToPage, selectReaderTab } from "./reader-utils";
@@ -167,13 +171,33 @@ class ZoteroPiAddon {
     globalEvents.emit({ type: "settings-changed" });
   }
 
-  listModels() {
-    return listModels();
+  /** Models of all configured sources; `override` previews unsaved settings. */
+  listModels(override?: Partial<Settings>) {
+    return listModels(override ? JSON.parse(JSON.stringify(override)) : undefined);
   }
 
   testConnection() {
     return testConnection();
   }
+
+  testModel(id: string) {
+    return testModel(String(id));
+  }
+
+  /** CLI agents and their workspaces (settings page). */
+  readonly cli = {
+    detect: (provider: CliProviderId) => detectCli(provider),
+    agyStatus: () => agyPluginStatus(),
+    installAgy: () => installAgyPlugin(this.version),
+    uninstallAgy: () => uninstallAgyPlugin(),
+    workspaceRoot: () => workspaces.workspaceRoot(),
+    defaultWorkspaceRoot: () => workspaces.defaultWorkspaceRoot(),
+    listWorkspaces: () => workspaces.listWorkspaces(),
+    reveal: (dir?: string) => workspaces.revealWorkspace(dir || workspaces.workspaceRoot()),
+    removeWorkspace: (dir: string) => workspaces.removeWorkspace(String(dir)),
+    cleanOrphans: () => workspaces.cleanOrphanWorkspaces(),
+    pruneAttachments: (days = 30) => workspaces.pruneAttachments(days),
+  };
 
   imageActions() {
     return IMAGE_ACTIONS;

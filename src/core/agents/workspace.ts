@@ -189,11 +189,13 @@ export async function pruneAttachments(days = 30): Promise<number> {
   return n;
 }
 
-export function revealWorkspace(dir: string): void {
+/** Open a workspace folder (created if missing) in the system file manager. */
+export async function revealWorkspace(dir: string): Promise<void> {
+  await mkdirp(dir);
   try {
-    Zotero.File.reveal(dir);
-  } catch {
     Zotero.launchFile(dir);
+  } catch {
+    Zotero.File.reveal(dir);
   }
 }
 

@@ -24,7 +24,8 @@ export interface ModelInfo {
 export const API_SOURCE = "deepseek";
 
 /** DeepSeek models known to pi, user-configured extra model ids, then the enabled CLI agents. */
-export function listModels(): ModelInfo[] {
+export function listModels(override?: Partial<ReturnType<typeof getSettings>>): ModelInfo[] {
+  const s = { ...getSettings(), ...(override || {}) };
   const builtin = models.getModels("deepseek");
   const api = { source: API_SOURCE, group: "DeepSeek API" };
   const out: ModelInfo[] = builtin.map((m) => ({
@@ -36,12 +37,11 @@ export function listModels(): ModelInfo[] {
     images: (m.input || []).includes("image"),
     ...api,
   }));
-  for (const id of extraModelIds()) {
+  for (const id of extraModelIds(s.extraModels)) {
     if (!out.some((m) => m.id === id)) {
       out.push({ id, name: id, reasoning: true, thinkingLevels: ["off", "low", "high", "max"], builtin: false, images: false, ...api });
     }
   }
-  const s = getSettings();
   const cli = cliModelEntries(
     { "claude-code": s.cliClaudeEnabled, codex: s.cliCodexEnabled, agy: s.cliAgyEnabled },
     { "claude-code": s.cliClaudeModels, codex: s.cliCodexModels, agy: s.cliAgyModels },
@@ -78,9 +78,9 @@ function cliModel(id: string): Model<Api> {
   } as any;
 }
 
-function extraModelIds(): string[] {
-  return getSettings()
-    .extraModels.split(/[,\s]+/)
+function extraModelIds(raw = getSettings().extraModels): string[] {
+  return String(raw || "")
+    .split(/[,\s]+/)
     .map((s) => s.trim())
     .filter(Boolean);
 }
@@ -227,6 +227,17 @@ function contextToPrompt(context: Context): { systemPrompt?: string; prompt: str
     parts.push(multi ? `${m.role === "assistant" ? "Assistant" : "User"}: ${text}` : text);
   }
   return { systemPrompt: context.systemPrompt, prompt: parts.join("\n\n"), images };
+}
+
+/** Round-trip a tiny prompt through any model (API or CLI). */
+export async function testModel(id: string): Promise<{ ok: boolean; message: string }> {
+  const t0 = Date.now();
+  try {
+    const text = await completeText({ messages: [{ role: "user", content: "Reply with exactly: OK", timestamp: Date.now() }] }, { model: id, maxTokens: 20 });
+    return { ok: true, message: `${getModel(id).name} 回复：${text.trim().slice(0, 50)}（${((Date.now() - t0) / 1000).toFixed(1)} 秒）` };
+  } catch (e: any) {
+    return { ok: false, message: String(e?.message || e) };
+  }
 }
 
 /** Check credentials and list models available on the account. */
