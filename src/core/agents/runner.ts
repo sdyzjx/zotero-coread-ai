@@ -6,8 +6,8 @@
  */
 import { getSettings } from "../config";
 import { LineSplitter, type CliEvent } from "./parsers";
-import { buildInvocation, CLI_PROVIDERS, mapEffort, parseCliModelId, type CliProviderId, type CliTurnSpec } from "./providers";
-import { resolveExecutable, runCapture, spawn } from "./proc";
+import { buildAgyStreamArgs, buildInvocation, CLI_PROVIDERS, formatAgyStreamTurn, mapEffort, parseCliModelId, type CliProviderId, type CliTurnSpec } from "./providers";
+import { resolveExecutable, runCapture, spawn, spawnInteractive, type InteractiveProcess } from "./proc";
 import { saveAttachment, workspaceRoot } from "./workspace";
 
 export interface CliRunResult {
@@ -31,16 +31,192 @@ export function executableFor(provider: CliProviderId): Promise<string> {
 /** agy routes its MCP traffic through one stable endpoint: one agy turn at a time. */
 let agyChain: Promise<unknown> = Promise.resolve();
 
+const AGY_IDLE_TTL_MS = 10 * 60 * 1000;
+
+interface PersistentAgy {
+  configKey: string;
+  conversationId?: string;
+  child: InteractiveProcess;
+  splitter: LineSplitter;
+  active: {
+    onLine: (line: string) => void;
+    onExit: (code: number) => void;
+  } | null;
+  dead: boolean;
+  idleTimer: any;
+}
+
+let persistentAgy: PersistentAgy | null = null;
+
+function disposePersistentAgy(target?: PersistentAgy | null): void {
+  const w = target === undefined ? persistentAgy : target;
+  if (!w) return;
+  if (persistentAgy === w) persistentAgy = null;
+  clearTimeout(w.idleTimer);
+  w.idleTimer = null;
+  if (!w.dead) {
+    w.dead = true;
+    void w.child.closeStdin();
+    w.child.kill();
+  }
+}
+
+/** Close any warm persistent CLI processes (called on plugin shutdown or plugin reinstall). */
+export function disposeCliProcesses(): void {
+  disposePersistentAgy();
+}
+
 export async function runCliTurn(
   provider: CliProviderId,
   spec: CliTurnSpec,
   opts: { cwd: string; signal?: AbortSignal; onEvent?: (e: CliEvent) => void; beforeStart?: () => void; afterEnd?: () => void },
 ): Promise<CliRunResult> {
-  const exec = () => runUnlocked(provider, spec, opts);
-  if (provider !== "agy") return exec();
-  const next = agyChain.then(exec, exec);
+  // Only MCP-backed agy turns share the single stable bridge endpoint; one-shot
+  // completions (background conclusion, translation, outline) should not block chat.
+  if (provider !== "agy" || !spec.mcpUrl) return runUnlocked(provider, spec, opts);
+  const prev = agyChain;
+  const run = async (): Promise<CliRunResult> => {
+    await prev;
+    if (opts.signal?.aborted) return { ok: false, aborted: true, error: "已停止", text: "" };
+    return runPersistentAgyTurn(spec, opts);
+  };
+  const next = run();
   agyChain = next.catch(() => undefined);
-  return next;
+  if (!opts.signal) return next;
+  return Promise.race([
+    next,
+    new Promise<CliRunResult>((resolve) => {
+      if (opts.signal!.aborted) resolve({ ok: false, aborted: true, error: "已停止", text: "" });
+      else opts.signal!.addEventListener("abort", () => resolve({ ok: false, aborted: true, error: "已停止", text: "" }), { once: true });
+    }),
+  ]);
+}
+
+async function runPersistentAgyTurn(
+  spec: CliTurnSpec,
+  opts: { cwd: string; signal?: AbortSignal; onEvent?: (e: CliEvent) => void; beforeStart?: () => void; afterEnd?: () => void },
+): Promise<CliRunResult> {
+  if (opts.signal?.aborted) return { ok: false, aborted: true, error: "已停止", text: "" };
+  const command = await executableFor("agy");
+  const configKey = JSON.stringify([command, opts.cwd, spec.model || "", spec.effort || "", spec.agyMode || ""]);
+
+  const attempt = async (allowReuse: boolean): Promise<CliRunResult> => {
+    let worker: PersistentAgy;
+    const reusing = allowReuse && !!persistentAgy && !persistentAgy.dead && persistentAgy.configKey === configKey && !!spec.resumeId && persistentAgy.conversationId === spec.resumeId;
+    if (reusing) {
+      worker = persistentAgy!;
+      clearTimeout(worker.idleTimer);
+      worker.idleTimer = null;
+    } else {
+      disposePersistentAgy();
+      const splitter = new LineSplitter();
+      worker = {
+        configKey,
+        conversationId: spec.resumeId,
+        child: null as any,
+        splitter,
+        active: null,
+        dead: false,
+        idleTimer: null,
+      };
+      const child = await spawnInteractive(command, buildAgyStreamArgs(spec), {
+        cwd: opts.cwd,
+        env: { NO_COLOR: "1" },
+        onStdout: (chunk) => {
+          for (const line of worker.splitter.push(chunk)) worker.active?.onLine(line);
+        },
+      });
+      worker.child = child;
+      persistentAgy = worker;
+      void child.wait().then((code) => {
+        worker.dead = true;
+        if (persistentAgy === worker) persistentAgy = null;
+        clearTimeout(worker.idleTimer);
+        worker.idleTimer = null;
+        const active = worker.active;
+        worker.active = null;
+        active?.onExit(code);
+      });
+    }
+
+    const result: CliRunResult = { ok: false, aborted: false, sessionId: worker.conversationId, text: "" };
+    const parser = CLI_PROVIDERS.agy.parser();
+    let settled = false;
+    let resolveTurn!: (r: CliRunResult) => void;
+    const turnDone = new Promise<CliRunResult>((r) => (resolveTurn = r));
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      worker.active = null;
+      opts.signal?.removeEventListener("abort", onAbort);
+      resolveTurn(result);
+    };
+
+    const onAbort = () => {
+      result.aborted = true;
+      result.error = "已停止";
+      disposePersistentAgy(worker);
+      finish();
+    };
+
+    const handleLine = (line: string) => {
+      for (const e of parser.line(line)) {
+        if (e.type === "session") {
+          result.sessionId = e.id;
+          worker.conversationId = e.id;
+        } else if (e.type === "text") {
+          result.text += e.delta;
+        } else if (e.type === "done") {
+          result.ok = e.ok;
+          if (!e.ok) result.error = e.error;
+          opts.onEvent?.(e);
+          if (!e.ok) disposePersistentAgy(worker);
+          else worker.idleTimer = setTimeout(() => disposePersistentAgy(worker), AGY_IDLE_TTL_MS);
+          finish();
+          return;
+        }
+        opts.onEvent?.(e);
+      }
+    };
+
+    worker.active = {
+      onLine: handleLine,
+      onExit(code) {
+        worker.splitter.flush().forEach(handleLine);
+        if (settled) return;
+        result.ok = false;
+        const tail = worker.child.stderr().trim().split("\n").slice(-6).join("\n");
+        result.error = `${CLI_PROVIDERS.agy.label} 退出（代码 ${code}）${tail ? `：${tail}` : ""}`;
+        finish();
+      },
+    };
+
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+    if (opts.signal?.aborted) {
+      onAbort();
+      return turnDone;
+    }
+
+    try {
+      await worker.child.write(formatAgyStreamTurn(spec));
+    } catch (err) {
+      worker.active = null;
+      opts.signal?.removeEventListener("abort", onAbort);
+      disposePersistentAgy(worker);
+      if (reusing) return attempt(false);
+      throw err;
+    }
+
+    return turnDone;
+  };
+
+  opts.beforeStart?.();
+  try {
+    return await attempt(true);
+  } finally {
+    opts.afterEnd?.();
+  }
 }
 
 async function runUnlocked(

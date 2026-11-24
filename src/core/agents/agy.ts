@@ -6,7 +6,7 @@
  */
 import { agyToken, mcpUrl } from "../mcp/bridge";
 import { runCapture } from "./proc";
-import { executableFor } from "./runner";
+import { disposeCliProcesses, executableFor } from "./runner";
 import { AGY_PLUGIN_NAME, writeAgyPlugin } from "./workspace";
 
 export interface AgyPluginStatus {
@@ -42,6 +42,7 @@ export async function installAgyPlugin(version: string): Promise<string> {
   }
   if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().slice(0, 400) || `agy plugin install 失败（代码 ${r.code}）`);
   await runCapture(agy, ["plugin", "enable", AGY_PLUGIN_NAME], 30000).catch(() => undefined);
+  disposeCliProcesses();
   return (r.stdout || "已安装").trim().split("\n").slice(-2).join("\n");
 }
 
@@ -49,4 +50,5 @@ export async function uninstallAgyPlugin(): Promise<void> {
   const agy = await executableFor("agy");
   const r = await runCapture(agy, ["plugin", "uninstall", AGY_PLUGIN_NAME], 30000);
   if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().slice(0, 400) || `agy plugin uninstall 失败（代码 ${r.code}）`);
+  disposeCliProcesses();
 }

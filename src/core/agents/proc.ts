@@ -5,7 +5,7 @@
  */
 let subprocessModule: any = null;
 function sp(): any {
-  if (!subprocessModule) subprocessModule = ChromeUtils.importESModule("resource://gre/modules/sp().sys.mjs").Subprocess;
+  if (!subprocessModule) subprocessModule = ChromeUtils.importESModule("resource://gre/modules/Subprocess.sys.mjs").Subprocess;
   return subprocessModule;
 }
 
@@ -14,6 +14,11 @@ export interface ChildProcess {
   wait(): Promise<number>;
   kill(): void;
   stderr(): string;
+}
+
+export interface InteractiveProcess extends ChildProcess {
+  write(data: string): Promise<void>;
+  closeStdin(): Promise<void>;
 }
 
 let pathPromise: Promise<string> | null = null;
@@ -60,6 +65,7 @@ async function loginShellPath(): Promise<string> {
   const shell = env.SHELL && /^\/[\w/.-]+$/.test(env.SHELL) ? env.SHELL : "/bin/zsh";
   try {
     const proc = await sp().call({ command: shell, arguments: ["-ilc", 'printf "__ZPATH__%s__ZPATH__" "$PATH"'], stderr: "ignore" });
+    await proc.stdin.close().catch(() => undefined);
     const timer = setTimeout(() => proc.kill(), 8000);
     const out = await readAll(proc.stdout);
     clearTimeout(timer);
@@ -88,10 +94,14 @@ export async function resolveExecutable(name: string, configured?: string): Prom
     if (!(await IOUtils.exists(custom))) throw new Error(`找不到可执行文件：${custom}`);
     return custom;
   }
+  const path = await searchPath();
   try {
-    return await sp().pathSearch(name, { PATH: await searchPath() });
-  } catch {
-    throw new Error(`在 PATH 中找不到 ${name}`);
+    return await sp().pathSearch(name, { PATH: path });
+  } catch (e: any) {
+    if (e?.errorCode === sp().ERROR_BAD_EXECUTABLE) {
+      throw new Error(`在 PATH 中找不到 ${name}`);
+    }
+    throw new Error(`查找 ${name} 失败：${e?.message || e}`);
   }
 }
 
@@ -104,7 +114,7 @@ export interface SpawnOptions {
   onStdout(chunk: string): void;
 }
 
-export async function spawn(command: string, args: string[], opts: SpawnOptions): Promise<ChildProcess> {
+async function startProcess(command: string, args: string[], opts: SpawnOptions, keepStdinOpen: boolean): Promise<InteractiveProcess> {
   const environment = { PATH: await searchPath(), ...(opts.env || {}) };
   const proc = await sp().call({
     command,
@@ -134,7 +144,7 @@ export async function spawn(command: string, args: string[], opts: SpawnOptions)
     }
   })();
   if (opts.stdin) await proc.stdin.write(opts.stdin).catch(() => undefined);
-  await proc.stdin.close().catch(() => undefined);
+  if (!keepStdinOpen) await proc.stdin.close().catch(() => undefined);
   return {
     async wait() {
       const { exitCode } = await proc.wait();
@@ -149,7 +159,21 @@ export async function spawn(command: string, args: string[], opts: SpawnOptions)
       }
     },
     stderr: () => stderr,
+    async write(data: string) {
+      await proc.stdin.write(data);
+    },
+    async closeStdin() {
+      await proc.stdin.close().catch(() => undefined);
+    },
   };
+}
+
+export async function spawn(command: string, args: string[], opts: SpawnOptions): Promise<ChildProcess> {
+  return startProcess(command, args, opts, false);
+}
+
+export async function spawnInteractive(command: string, args: string[], opts: Omit<SpawnOptions, "stdin">): Promise<InteractiveProcess> {
+  return startProcess(command, args, opts, true);
 }
 
 /** Run a command to completion and return its output (for version checks). */

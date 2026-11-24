@@ -5,7 +5,7 @@ import { ContextTracker } from "./context";
 import { globalEvents } from "./events";
 import { listModels, testConnection, testModel } from "./llm";
 import { agyPluginStatus, installAgyPlugin, uninstallAgyPlugin } from "./agents/agy";
-import { detectCli } from "./agents/runner";
+import { detectCli, disposeCliProcesses } from "./agents/runner";
 import type { CliProviderId } from "./agents/providers";
 import * as workspaces from "./agents/workspace";
 import { getItem, getMainAttachment, type PaperRef } from "./paper";
@@ -151,6 +151,7 @@ class ZoteroPiAddon {
     this.context.stop();
     if (this.win) this.onMainWindowUnload(this.win);
     this.sessions.dispose();
+    disposeCliProcesses();
     globalEvents.clear();
     for (const w of Services.wm.getEnumerator("zoteropi:settings")) w.close();
     if (__DEV__) unregisterDevEndpoint();

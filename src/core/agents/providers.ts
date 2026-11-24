@@ -134,6 +134,22 @@ function inlineInstructions(spec: CliTurnSpec): string {
   return `<instructions>\n${spec.systemPrompt.trim()}\n</instructions>\n\n${spec.prompt}`;
 }
 
+export function buildAgyStreamArgs(spec: Pick<CliTurnSpec, "resumeId" | "agyMode" | "model" | "effort">): string[] {
+  const args = ["--input-format", "stream-json", "--output-format", "stream-json"];
+  if (spec.resumeId) args.push("--conversation", spec.resumeId);
+  if (spec.agyMode === "auto") args.push("--dangerously-skip-permissions");
+  else if (spec.agyMode) args.push("--mode", spec.agyMode);
+  if (spec.model) args.push("--model", spec.model);
+  if (spec.effort) args.push("--effort", spec.effort);
+  return args;
+}
+
+export function formatAgyStreamTurn(spec: Pick<CliTurnSpec, "prompt" | "systemPrompt" | "resumeId" | "instructionsInWorkspace" | "imagePaths">): string {
+  let prompt = inlineInstructions(spec as CliTurnSpec);
+  if (spec.imagePaths?.length) prompt += `\n\n(Attached image files: ${spec.imagePaths.join(", ")})`;
+  return JSON.stringify({ event: "user", message: { content: prompt } }) + "\n";
+}
+
 export function buildInvocation(provider: CliProviderId, spec: CliTurnSpec): CliInvocation {
   switch (provider) {
     case "claude-code": {
@@ -180,7 +196,8 @@ export function buildInvocation(provider: CliProviderId, spec: CliTurnSpec): Cli
     case "agy": {
       const args = ["--output-format", "stream-json"];
       if (spec.resumeId) args.push("--conversation", spec.resumeId);
-      if (spec.agyMode) args.push("--mode", spec.agyMode);
+      if (spec.agyMode === "auto") args.push("--dangerously-skip-permissions");
+      else if (spec.agyMode) args.push("--mode", spec.agyMode);
       if (spec.model) args.push("--model", spec.model);
       if (spec.effort) args.push("--effort", spec.effort);
       let prompt = inlineInstructions(spec);

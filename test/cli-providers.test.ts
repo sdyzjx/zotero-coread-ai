@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildInvocation, cliModelEntries, mapEffort, parseCliModelId } from "../src/core/agents/providers.ts";
+import { buildAgyStreamArgs, buildInvocation, cliModelEntries, formatAgyStreamTurn, mapEffort, parseCliModelId } from "../src/core/agents/providers.ts";
 
 test("model ids", () => {
   assert.deepEqual(parseCliModelId("claude-code"), { provider: "claude-code", model: "" });
@@ -84,8 +84,33 @@ test("agy: prompt attached to -p, instructions only for new conversations", () =
   const last = fresh.args[fresh.args.length - 1];
   assert.ok(last.startsWith("-p=<instructions>\nYou are Pi."));
   assert.match(last, /- list\n\n\(Attached image files: \/w\/a\.png\)$/);
-  assert.equal(fresh.args[fresh.args.indexOf("--mode") + 1], "auto");
+  assert.ok(fresh.args.includes("--dangerously-skip-permissions"));
+  assert.ok(!fresh.args.includes("--mode"));
+  const planned = buildInvocation("agy", { prompt: "plan", agyMode: "plan" });
+  assert.equal(planned.args[planned.args.indexOf("--mode") + 1], "plan");
   const resumed = buildInvocation("agy", { prompt: "next", systemPrompt: "You are Pi.", resumeId: "c-1" });
   assert.equal(resumed.args[resumed.args.indexOf("--conversation") + 1], "c-1");
   assert.equal(resumed.args[resumed.args.length - 1], "-p=next");
+});
+
+test("agy: persistent stream-json args and NDJSON turn payload", () => {
+  const args = buildAgyStreamArgs({ resumeId: "c-1", agyMode: "auto", model: "gemini-x", effort: "medium" });
+  assert.deepEqual(args, [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--conversation",
+    "c-1",
+    "--dangerously-skip-permissions",
+    "--model",
+    "gemini-x",
+    "--effort",
+    "medium",
+  ]);
+  const first = JSON.parse(formatAgyStreamTurn({ prompt: "hi", systemPrompt: "You are Pi.", imagePaths: ["/w/a.png"] }));
+  assert.equal(first.event, "user");
+  assert.match(first.message.content, /^<instructions>\nYou are Pi\.\n<\/instructions>\n\nhi\n\n\(Attached image files: \/w\/a\.png\)$/);
+  const second = JSON.parse(formatAgyStreamTurn({ prompt: "follow up", systemPrompt: "You are Pi.", resumeId: "c-1" }));
+  assert.deepEqual(second, { event: "user", message: { content: "follow up" } });
 });
