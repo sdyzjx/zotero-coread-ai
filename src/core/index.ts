@@ -10,6 +10,8 @@ import { ensureReader, navigateToPage, selectReaderTab } from "./reader-utils";
 import { SessionManager } from "./sessions";
 import { closeStore, openStore } from "./store";
 import { ChatPanel } from "./ui/panel";
+import { OutlineService } from "./outline";
+import { OutlineGutter } from "./ui/outline-gutter";
 import { QuickCard } from "./ui/quickcard";
 import { injectToolbarIntoOpenReaders, registerReaderHooks, removeToolbarFromReaders } from "./ui/reader-hooks";
 import { registerDevEndpoint, unregisterDevEndpoint } from "./dev";
@@ -24,7 +26,9 @@ class ZoteroPiAddon {
   readonly sessions = new SessionManager();
   readonly context = new ContextTracker();
   readonly quick = new QuickService(this.sessions);
+  readonly outline = new OutlineService();
   panel: ChatPanel | null = null;
+  gutter: OutlineGutter | null = null;
   card: QuickCard | null = null;
   private win: any = null;
   private menuItems: Element[] = [];
@@ -64,6 +68,7 @@ class ZoteroPiAddon {
       this.quick.changes.on((job) => {
         if (!job) this.card?.close();
       }),
+      this.context.changes.on((ctx) => this.autoOutline(ctx)),
     );
     const win = Zotero.getMainWindow();
     if (win?.document?.readyState === "complete") this.onMainWindowLoad(win);
@@ -86,8 +91,18 @@ class ZoteroPiAddon {
         this.card?.close();
       },
     );
+    this.gutter = new OutlineGutter(win, this.outline, this.context);
     this.addMenu(win);
     win.addEventListener("keydown", this.onKey, true);
+  }
+
+  /** 文章脉络: analyze automatically the first time a PDF is opened in the reader. */
+  private autoOutline(ctx: ReturnType<ContextTracker["get"]>): void {
+    if (!ctx || ctx.source !== "reader" || !ctx.attachmentID || !getSettings().autoOutline) return;
+    const att = Zotero.Items.get(ctx.attachmentID);
+    if (!att?.isPDFAttachment?.()) return;
+    if (!getSettings().apiKey.trim()) return;
+    void this.outline.ensure(ctx.ref).catch((e) => Zotero.logError(e));
   }
 
   onMainWindowUnload(win: any): void {
@@ -95,6 +110,8 @@ class ZoteroPiAddon {
     win.removeEventListener("keydown", this.onKey, true);
     this.panel?.destroy();
     this.card?.destroy();
+    this.gutter?.destroy();
+    this.gutter = null;
     for (const m of this.menuItems) m.remove();
     this.menuItems = [];
     this.panel = null;
@@ -109,11 +126,14 @@ class ZoteroPiAddon {
     const toggle = win.document.createXULElement("menuitem");
     toggle.setAttribute("label", "Pi Agent 聊天面板");
     toggle.addEventListener("command", () => this.togglePanel());
+    const outline = win.document.createXULElement("menuitem");
+    outline.setAttribute("label", "Pi Agent 文章脉络");
+    outline.addEventListener("command", () => this.toggleOutline());
     const settings = win.document.createXULElement("menuitem");
     settings.setAttribute("label", "Pi Agent 设置…");
     settings.addEventListener("command", () => this.openSettings());
-    popup.append(sep, toggle, settings);
-    this.menuItems = [sep, toggle, settings];
+    popup.append(sep, toggle, outline, settings);
+    this.menuItems = [sep, toggle, outline, settings];
   }
 
   async shutdown(): Promise<void> {
@@ -125,6 +145,7 @@ class ZoteroPiAddon {
       Zotero.logError(e);
     }
     this.quick.cancel();
+    this.outline.dispose();
     this.context.stop();
     if (this.win) this.onMainWindowUnload(this.win);
     this.sessions.dispose();
@@ -161,6 +182,10 @@ class ZoteroPiAddon {
 
   togglePanel(): void {
     this.panel?.toggle();
+  }
+
+  toggleOutline(): void {
+    this.gutter?.toggle();
   }
 
   openSettings(): void {

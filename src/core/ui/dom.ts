@@ -10,9 +10,9 @@ export function h(doc: Document, tag: string, attrs: Record<string, string> = {}
   return el;
 }
 
-export function ensureStylesheet(doc: Document): void {
-  if (doc.getElementById("zoteropi-css")) return;
-  const link = h(doc, "link", { id: "zoteropi-css", rel: "stylesheet", href: "chrome://zoteropi/content/panel.css" });
+export function ensureStylesheet(doc: Document, id = "zoteropi-css", href = "chrome://zoteropi/content/panel.css"): void {
+  if (doc.getElementById(id)) return;
+  const link = h(doc, "link", { id, rel: "stylesheet", href });
   doc.documentElement.appendChild(link);
 }
 

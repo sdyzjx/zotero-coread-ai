@@ -10,6 +10,7 @@ export interface ReaderHookHost {
   pluginID: string;
   runQuickAction(reader: any, action: QuickAction | "ask" | "quote", sel: Selection, anchor: DOMRect | null): void;
   togglePanel(): void;
+  toggleOutline(): void;
   startRegionAsk(reader: any): void;
   askImageAnnotation(reader: any, key: string): void;
 }
@@ -113,10 +114,16 @@ function buildToolbarButtons(doc: any, host: ReaderHookHost, reader: any): any {
   r.textContent = "π⬚";
   r.setAttribute("style", "font-weight:700;font-size:13px;color:#6d5bd0;width:auto;padding:0 6px;");
   r.addEventListener("click", () => host.startRegionAsk(reader));
+  const o = doc.createElement("button");
+  o.className = "toolbar-button";
+  o.title = "文章脉络：在左侧空白处显示 / 隐藏论文结构";
+  o.textContent = "π≡";
+  o.setAttribute("style", "font-weight:700;font-size:13px;color:#6d5bd0;width:auto;padding:0 6px;");
+  o.addEventListener("click", () => host.toggleOutline());
   const wrap = doc.createElement("div");
   wrap.className = TOOLBAR_CLASS;
   wrap.setAttribute("style", "display:flex;flex-direction:row;align-items:center;gap:2px;");
-  wrap.append(b, r);
+  wrap.append(b, r, o);
   return wrap;
 }
 
