@@ -1,8 +1,8 @@
 {
   "name": "zotero-pi-agent",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "private": true,
-  "description": "Zotero plugin: AI reading assistant powered by pi agent",
+  "description": "Zotero plugin: AI reading assistant powered by pi agent, Claude Code, Codex or Antigravity",
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",

@@ -1,6 +1,6 @@
 # Zotero Pi Agent
 
-基于 [pi agent](https://github.com/earendil-works/pi)（`@earendil-works/pi-agent-core` + `pi-ai`）的 Zotero 7–10 AI 阅读助手插件。核心 agent 循环、模型接入与流式输出全部由 pi 提供，本插件只负责接入 Zotero 相关的工具与界面。
+基于 [pi agent](https://github.com/earendil-works/pi)（`@earendil-works/pi-agent-core` + `pi-ai`）的 Zotero 7–10 AI 阅读助手插件。核心 agent 循环、模型接入与流式输出由 pi 提供，本插件负责接入 Zotero 相关的工具与界面。AI 部分也可以直接交给本机已登录的 **Claude Code / Codex / Antigravity（agy）CLI**，它们通过 MCP 使用同一套 Zotero 工具。
 
 ## 功能
 
@@ -60,13 +60,30 @@
 
 pi 本身只内置了 bash / 读写文件等「电脑操作」类工具（在 `pi-coding-agent` 中），按需求未接入；上表工具均为本插件实现。
 
-**模型**：DeepSeek V4.1 Flash（`deepseek-flash`，默认）与 DeepSeek V4 Pro（`deepseek-v4-pro`），来自 pi-ai 的 DeepSeek provider；设置中可添加其他 DeepSeek 模型 ID。每个会话可单独切换模型与思考强度。
+**模型来源**
+
+| 来源 | 说明 |
+| --- | --- |
+| DeepSeek API | DeepSeek V4.1 Flash（`deepseek-flash`，默认）与 V4 Pro，来自 pi-ai 的 DeepSeek provider；可添加其他模型 ID |
+| Claude Code | 调用本机 `claude` CLI（使用其登录账号）；模型 ID `claude-code` 或 `claude-code:<model>`（如 `claude-code:sonnet`） |
+| Codex | 调用本机 `codex` CLI；`codex` 或 `codex:<model>` |
+| Antigravity | 调用本机 `agy` CLI；`agy` 或 `agy:<model>`；需在设置中一键安装 Zotero 工具插件 |
+
+- 设置页「模型来源」以标签页列出各来源：状态、可执行文件检测、可选模型、测试对话，「设为默认来源」会同时把对话和翻译 / 结论指向该来源。「模型分配」集中设置对话 / 思考强度 / 翻译与结论 / 脉络分析所用模型，菜单按来源分组。
+- 聊天框下方的模型菜单可以在会话中途切换来源：同一份聊天记录继续，CLI 没见过的轮次会作为上下文交给它。
+- 翻译、会话结论、文章脉络、图片描述也可以走 CLI（一次性调用，不持久化会话）；没有 DeepSeek Key 也能使用全部功能（网络搜索回退到 DuckDuckGo）。
+
+**CLI 接入原理**（参考 Lattice / Synara 的做法）
+
+- **工具兼容**：插件在 Zotero 本地服务器（`127.0.0.1:23119`）上提供无状态 MCP 端点 `/zoteropi/mcp/<token>`，把上表的全部 pi 工具原样暴露给 CLI（同样的参数校验、顺序执行约束与结果，包括图片）。每轮对话生成一次性 token；工具调用由 MCP 桥执行并生成与内置 Agent 相同的工具卡片。
+- **最小权限**：Claude Code 以 `--tools ""` 关闭内置工具、`--strict-mcp-config` 只连 Zotero、`--permission-mode dontAsk` 只放行 `mcp__zotero`；Codex 使用只读沙箱并只批准 zotero MCP；默认「隔离 CLI 配置」不加载 CLI 自己的 hooks / MCP / 用户设置。Antigravity 只读全局 MCP 配置，因此用一个 `zotero-pi` agy 插件指向固定端点，Zotero 把 agy 轮次串行化并路由到当前会话；未在对话时该端点不提供任何工具。
+- **工作区管理**：每篇论文一个工作目录 `<Zotero 数据目录>/zoteropi/papers/<库ID>_<条目Key>/`（可在设置中更改根目录），包含 `AGENTS.md`（Agent 说明）、`paper.json` 与随消息发送的图片；CLI 的会话按目录续接，聊天会话与 CLI 会话 ID 的对应关系保存在插件数据库中。设置页可查看各工作区大小、打开 / 删除、清理已删除条目的工作区与旧附件。
 
 ## 安装
 
 1. `npm install && npm run build`，得到 `build/zotero-pi-agent-<version>.xpi`。
 2. Zotero → 工具 → 插件 → 齿轮 → 「从文件安装插件…」，选择该 xpi。
-3. 打开 Zotero 设置 → **Pi Agent**（或 工具 → Pi Agent 设置…），填入 DeepSeek API Key，点「测试连接」。
+3. 打开 Zotero 设置 → **Pi Agent**（或 工具 → Pi Agent 设置…），在「模型来源」中填入 DeepSeek API Key 并「测试连接」，或选择 Claude Code / Codex / Antigravity 标签页「检测」本机 CLI 后「设为默认来源」（CLI 需事先安装并登录；Antigravity 还需点「安装插件」）。
 
 **预置 API Key（本地构建）**：复制 `.env.example` 为 `.env`（已在 `.gitignore` 中，不会提交）：
 
@@ -80,7 +97,7 @@ DEEPSEEK_API_KEY=sk-...
 
 ```bash
 npm run typecheck   # TypeScript 检查
-npm test            # 纯逻辑单元测试（原文定位、标题识别、Markdown 公式、脉络解析与锚点、批注格式）
+npm test            # 纯逻辑单元测试（原文定位、标题识别、Markdown 公式、脉络解析与锚点、批注格式、MCP 协议、CLI 命令行与输出解析）
 npm run build:dev   # 开发构建（含 sourcemap 与本地调试端点）
 ```
 
@@ -91,8 +108,11 @@ npm run build:dev   # 开发构建（含 sourcemap 与本地调试端点）
 ```
 addon/                 插件静态文件（manifest、bootstrap、prefs、HTML/CSS）
 src/core/              运行在插件沙箱中的核心
-  llm.ts               pi-ai 模型 / DeepSeek provider / API Key 注入
-  sessions.ts          每个会话一个 pi Agent；持久化、快照、自动结论
+  llm.ts               pi-ai 模型 / DeepSeek provider / API Key 注入；CLI 模型的列表与一次性调用路由
+  sessions.ts          每个会话一个引擎（pi Agent 或 CLI 引擎，可中途切换）；持久化、快照、自动结论
+  mcp/                 MCP 协议（protocol.ts）与 Zotero 本地服务器上的工具桥（bridge.ts）
+  agents/              CLI 接入：命令行（providers）、输出解析（parsers）、进程（proc）、运行（runner）、
+                       会话引擎（engine）、工作区（workspace）、agy 插件（agy）
   tools/               agent 工具（论文、批注、文献库、网络、学术）
   paper.ts text.ts     全文抽取（PDFWorker，按页）、标题识别、搜索、原文匹配
   annotate.ts          高亮 / 便签写入（Zotero.Annotations.saveFromJSON）
@@ -106,5 +126,6 @@ src/shared/note-format.ts  批注评论格式转换（Markdown / LaTeX → Zoter
 ## 说明
 
 - API Key 以明文保存在 Zotero 偏好设置（`prefs.js`）中。
+- CLI 模型使用各 CLI 自己的登录与计费；首次调用需要启动 CLI，通常比 API 慢几秒。Zotero 本地服务器需保持开启（默认开启，供 Zotero Connector 使用）。
 - DeepSeek Search / Fetch 按次计费（约 $0.75 / 千次成功请求），可在设置中改用免费的 DuckDuckGo / 本地抓取。
 - 自动创建高亮需要 PDF 附件；agent 会在后台打开阅读器以获取字符坐标。
