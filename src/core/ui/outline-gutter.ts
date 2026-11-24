@@ -106,6 +106,7 @@ export class OutlineGutter {
       h(doc, "span", { class: "zpo-pill-text", text: "脉络" }),
     ]);
     this.pill.addEventListener("click", () => this.onPill());
+    this.gutter.addEventListener("wheel", (e) => this.onWheel(e as WheelEvent), { passive: true });
     this.guideSvg = doc.createElementNS(SVG_NS, "svg") as SVGSVGElement;
     this.guideSvg.setAttribute("class", "zpo-guide");
     this.root.append(this.gutter, this.pill, this.guideSvg);
@@ -121,6 +122,21 @@ export class OutlineGutter {
     this.floatingOpen = false;
     this.layout();
   };
+
+  /** The margin must not swallow scrolling: pass the wheel to the PDF when the outline can't scroll that way. */
+  private onWheel(e: WheelEvent): void {
+    const b = this.body;
+    const canScroll = b.isConnected && (e.deltaY < 0 ? b.scrollTop > 0 : b.scrollTop + b.clientHeight < b.scrollHeight - 1);
+    if (canScroll && b.contains(e.target as Node)) return;
+    try {
+      const pv = waive(waive(this.reader?._internalReader)?._primaryView);
+      const container = waive(waive(waive(pv?._iframeWindow)?.PDFViewerApplication)?.pdfViewer?.container);
+      const line = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? container.clientHeight : 1;
+      container.scrollBy(e.deltaX * line, e.deltaY * line);
+    } catch {
+      // reader gone
+    }
+  }
 
   private btn(label: string, title: string, fn: () => void): HTMLElement {
     const b = h(this.doc, "button", { class: "zpo-btn", title, text: label });
@@ -240,7 +256,8 @@ export class OutlineGutter {
     if (s.left !== px(left)) s.left = px(left);
     if (s.top !== px(top)) s.top = px(top);
     if (s.width !== px(width)) s.width = px(width);
-    if (s.height !== px(height)) s.height = px(height);
+    // Shrink to content; scroll inside when taller than the view
+    if (s.maxHeight !== px(height)) s.maxHeight = px(height);
   }
 
   private onPill(): void {
