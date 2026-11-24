@@ -15,6 +15,7 @@ import { OutlineGutter } from "./ui/outline-gutter";
 import { QuickCard } from "./ui/quickcard";
 import { injectToolbarIntoOpenReaders, registerReaderHooks, removeToolbarFromReaders } from "./ui/reader-hooks";
 import { registerDevEndpoint, unregisterDevEndpoint } from "./dev";
+import { registerMcpEndpoint, unregisterMcpEndpoint } from "./mcp/bridge";
 import { selectRegion } from "./ui/region-select";
 import { renderRegion, type RenderedRegion } from "./vision";
 import { findReader } from "./reader-utils";
@@ -48,6 +49,7 @@ class ZoteroPiAddon {
   async startup(): Promise<void> {
     await openStore();
     if (__DEV__) registerDevEndpoint(this);
+    registerMcpEndpoint();
     registerReaderHooks(this);
     injectToolbarIntoOpenReaders(this);
     // Readers restored from the previous session may still be loading.
@@ -148,6 +150,7 @@ class ZoteroPiAddon {
     globalEvents.clear();
     for (const w of Services.wm.getEnumerator("zoteropi:settings")) w.close();
     if (__DEV__) unregisterDevEndpoint();
+    unregisterMcpEndpoint();
     disposePolyfills();
     await closeStore();
   }
