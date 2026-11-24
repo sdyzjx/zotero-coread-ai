@@ -161,6 +161,17 @@ export class OutlineService {
   }
 }
 
+/** Cached outline without touching the service state (for agent tools). */
+export async function loadCachedOutline(ref: PaperRef): Promise<PaperOutline | null> {
+  try {
+    const raw = await kvGet(KV_PREFIX + paperKey(ref));
+    const o = raw ? (JSON.parse(raw) as PaperOutline) : null;
+    return o?.version === 1 ? o : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Locating anchors on the page
 

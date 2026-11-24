@@ -70,6 +70,7 @@ class ZoteroPiAddon {
       }),
       this.context.changes.on((ctx) => this.autoOutline(ctx)),
     );
+    this.autoOutline(this.context.get()); // a reader tab may already be selected
     const win = Zotero.getMainWindow();
     if (win?.document?.readyState === "complete") this.onMainWindowLoad(win);
   }

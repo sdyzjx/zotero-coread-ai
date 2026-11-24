@@ -144,6 +144,24 @@ function App() {
       </section>
 
       <section>
+        <h2>文章脉络</h2>
+        <Field label="打开 PDF 时自动分析" hint="首次在阅读器中打开一篇论文时，在后台梳理背景 → 问题 → 相关工作 → Gap → 方法 → 实验 → 结果 → 结论（综述梳理发展脉络与研究分支），显示在 PDF 左侧空白处；结果会缓存">
+          <input type="checkbox" checked={s.autoOutline} onChange={(e) => set("autoOutline", (e.target as HTMLInputElement).checked)} />
+        </Field>
+        <Field label="在左侧显示脉络" hint="也可以用阅读器工具栏的 π≡ 按钮切换">
+          <input type="checkbox" checked={s.outlineVisible} onChange={(e) => set("outlineVisible", (e.target as HTMLInputElement).checked)} />
+        </Field>
+        <Field label="脉络分析模型" hint="默认使用「翻译 / 结论模型」；分析时开启思考以提高结构质量">
+          <select value={s.outlineModel} onChange={(e) => set("outlineModel", (e.target as HTMLSelectElement).value)}>
+            <option value="">与翻译 / 结论模型相同</option>
+            {models.map((m) => (
+              <option value={m.id}>{m.name}</option>
+            ))}
+          </select>
+        </Field>
+      </section>
+
+      <section>
         <h2>网络搜索</h2>
         <Field label="搜索引擎" hint="DeepSeek 搜索使用同一个 API Key，按次计费（约 $0.75 / 千次成功请求）；失败时自动回退到 DuckDuckGo">
           <select value={s.searchEngine} onChange={(e) => set("searchEngine", (e.target as HTMLSelectElement).value)}>
