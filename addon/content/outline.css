@@ -31,6 +31,7 @@
   }
 }
 .zpo-gutter[hidden],
+.zpo-resizer[hidden],
 .zpo-pill[hidden] {
   display: none !important;
 }
@@ -61,6 +62,39 @@
 }
 .zpo-root[data-mode="floating"] .zpo-gutter:hover {
   opacity: 1;
+}
+
+/* Width handle on the card's right edge */
+.zpo-resizer {
+  position: fixed;
+  width: 8px;
+  margin-left: -4px;
+  pointer-events: auto;
+  cursor: ew-resize;
+  z-index: 1;
+}
+.zpo-resizer::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  width: 2px;
+  height: 36px;
+  margin-top: -18px;
+  border-radius: 1px;
+  background: var(--zpo-line);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.zpo-resizer:hover::after,
+.zpo-root.zpo-resizing .zpo-resizer::after {
+  opacity: 1;
+  background: var(--zpo-accent);
+}
+.zpo-root.zpo-resizing,
+.zpo-root.zpo-resizing * {
+  cursor: ew-resize !important;
+  user-select: none;
 }
 
 .zpo-head {

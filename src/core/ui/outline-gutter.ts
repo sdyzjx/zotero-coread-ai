@@ -15,10 +15,11 @@ import { findReader, waive } from "../reader-utils";
 import { ensureStylesheet, h } from "./dom";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const MIN_DOCK = 190;
-const MAX_W = 340;
-const FLOAT_W = 280;
-const GAP = 14;
+/** Navigator column width bounds (px). */
+const MIN_W = 200;
+const MAX_W = 640;
+/** Narrowest PDF area we accept before floating over the page instead of reserving a column. */
+const MIN_PDF_W = 380;
 
 const SECTION_COLORS: Record<string, string> = {
   background: "#7c8db5",
@@ -44,8 +45,11 @@ interface Box {
 }
 
 interface Geometry {
+  /** The PDF scroll area. */
   view: Box;
-  pageLeft: number;
+  /** Left edge and width of the reader's view host (the area the column is carved from). */
+  hostLeft: number;
+  hostWidth: number;
   /** Offset of the pdf.js document in main-window coordinates. */
   ox: number;
   oy: number;
@@ -53,7 +57,7 @@ interface Geometry {
   pv: any;
 }
 
-/** docked: in the page margin; floating: over the page edge; pill: collapsed by the user. */
+/** docked: own column, PDF pushed right; floating: over the page edge (reader too narrow); pill: collapsed. */
 type Mode = "docked" | "floating" | "pill" | "none";
 
 export class OutlineGutter {
@@ -69,6 +73,11 @@ export class OutlineGutter {
   private outline: PaperOutline | null = null;
   private mode: Mode = "none";
   private loadingSince = 0;
+  private resizer!: HTMLElement;
+  private width = 0;
+  private dragging = false;
+  /** Readers whose PDF view we shrank to make room for the column. */
+  private reserved = new Set<any>();
   private expanded = new Map<string, Set<string>>();
   private rows = new Map<string, HTMLElement>();
   private activeId: string | null = null;
@@ -112,7 +121,14 @@ export class OutlineGutter {
     this.gutter.addEventListener("wheel", (e) => this.onWheel(e as WheelEvent), { passive: true });
     this.guideSvg = doc.createElementNS(SVG_NS, "svg") as SVGSVGElement;
     this.guideSvg.setAttribute("class", "zpo-guide");
-    this.root.append(this.gutter, this.pill, this.guideSvg);
+    this.resizer = h(doc, "div", { class: "zpo-resizer", hidden: "true", title: "拖动调整脉络宽度（PDF 随之缩放）" });
+    this.resizer.addEventListener("pointerdown", (e) => this.startResize(e as PointerEvent));
+    this.resizer.addEventListener("dblclick", () => {
+      this.width = 300;
+      saveSettings({ outlineWidth: 300 });
+      this.layout();
+    });
+    this.root.append(this.gutter, this.resizer, this.pill, this.guideSvg);
     doc.documentElement.appendChild(this.root);
   }
 
@@ -178,31 +194,89 @@ export class OutlineGutter {
       if (R.width < 80 || R.height < 80) return null;
       const pv = waive(waive(r._internalReader)?._primaryView);
       const inner: Element | undefined = pv?._iframe;
+      const host: Element | null | undefined = inner?.parentElement;
       const app = waive(waive(pv?._iframeWindow)?.PDFViewerApplication);
       const viewer = waive(app?.pdfViewer);
-      if (!inner || !viewer?.pagesCount) return null;
+      if (!inner || !host || !viewer?.pagesCount) return null;
       const I = inner.getBoundingClientRect();
+      const H = host.getBoundingClientRect();
       const container = waive(viewer.container);
       const C = container.getBoundingClientRect();
       const ox = R.left + I.left;
       const oy = R.top + I.top;
       const view = { left: ox + C.left, top: oy + C.top, right: ox + Math.min(C.right, I.width), bottom: oy + Math.min(C.bottom, I.height) };
-      let pageLeft = Infinity;
-      const vis = waive(viewer._getVisiblePages?.());
-      const views: any[] = vis?.views ? Array.from(waive(vis.views) as any[]) : [];
-      for (const v of views) {
-        const div = waive(waive(waive(v).view)?.div);
-        if (div) pageLeft = Math.min(pageLeft, ox + div.getBoundingClientRect().left);
-      }
-      if (!isFinite(pageLeft)) {
-        const div = waive(waive(viewer.getPageView(viewer.currentPageNumber - 1))?.div);
-        if (div) pageLeft = ox + div.getBoundingClientRect().left;
-      }
-      if (!isFinite(pageLeft)) return null;
-      return { view, pageLeft, ox, oy, app, pv };
+      return { view, hostLeft: R.left + H.left, hostWidth: H.width, ox, oy, app, pv };
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Shrink (px > 0) or restore (px = 0) the reader's PDF view so the column doesn't cover the
+   * page. Resizing the view iframe makes pdf.js / Zotero re-fit "page width" / "auto" zoom by
+   * themselves, so the paper rescales together with the column.
+   */
+  private reserve(reader: any, px: number): void {
+    try {
+      const pv = waive(waive(reader?._internalReader)?._primaryView);
+      const iframe = pv?._iframe as HTMLElement | undefined;
+      const host = iframe?.parentElement as HTMLElement | null | undefined;
+      if (!iframe || !host) return;
+      const want = px > 0 ? `${Math.round(px)}px` : "";
+      if (iframe.style.marginInlineStart === want) return;
+      if (px > 0) {
+        iframe.style.marginInlineStart = want;
+        iframe.style.width = `calc(100% - ${want})`;
+        iframe.style.flexShrink = "0";
+        host.style.backgroundColor = viewerBackground(pv);
+        this.reserved.add(reader);
+      } else {
+        iframe.style.marginInlineStart = "";
+        iframe.style.width = "";
+        iframe.style.flexShrink = "";
+        host.style.backgroundColor = "";
+        this.reserved.delete(reader);
+      }
+    } catch (e) {
+      Zotero.debug(`[ZoteroPi] outline reserve: ${e}`);
+    }
+  }
+
+  private releaseAll(except?: any): void {
+    for (const r of [...this.reserved]) if (r !== except) this.reserve(r, 0);
+  }
+
+  private startResize(e: PointerEvent): void {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const el = this.resizer;
+    const startX = e.clientX;
+    const startW = this.width;
+    el.setPointerCapture(e.pointerId);
+    this.dragging = true;
+    this.root.classList.add("zpo-resizing");
+    let raf = 0;
+    const move = (ev: PointerEvent) => {
+      this.width = startW + (ev.clientX - startX);
+      if (!raf) {
+        raf = this.win.requestAnimationFrame(() => {
+          raf = 0;
+          this.layout();
+        });
+      }
+    };
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      this.dragging = false;
+      this.root.classList.remove("zpo-resizing");
+      this.layout();
+      saveSettings({ outlineWidth: Math.round(this.width) });
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
   }
 
   private tick(): void {
@@ -214,31 +288,44 @@ export class OutlineGutter {
 
   private layout(): void {
     const g = this.ctx ? this.geometry() : null;
-    const visible = getSettings().outlineVisible;
+    const settings = getSettings();
+    const visible = settings.outlineVisible;
+    if (!this.dragging) this.width = this.width || settings.outlineWidth || 300;
     let mode: Mode = "none";
+    let width = 0;
     if (g) {
-      const avail = g.pageLeft - g.view.left - GAP - 8;
+      const maxW = Math.max(MIN_W, Math.min(MAX_W, g.hostWidth * 0.55));
+      width = Math.max(MIN_W, Math.min(maxW, this.width));
+      this.width = width;
       if (!visible) mode = "pill";
-      else if (avail >= MIN_DOCK) mode = "docked";
+      else if (g.hostWidth - width >= MIN_PDF_W) mode = "docked";
       else mode = "floating";
     }
+    // Only the current reader keeps its column; others go back to full width
+    this.releaseAll(mode === "docked" ? this.reader : undefined);
+    if (mode === "docked") this.reserve(this.reader, width);
+    else if (this.reader) this.reserve(this.reader, 0);
+
     if (mode !== this.mode) {
       this.mode = mode;
       this.root.setAttribute("data-mode", mode);
       if (mode === "none") this.cancelGuide();
     }
-    this.gutter.hidden = !(mode === "docked" || mode === "floating");
+    const showCard = mode === "docked" || mode === "floating";
+    this.gutter.hidden = !showCard;
+    this.resizer.hidden = !showCard;
     this.pill.hidden = mode !== "pill";
     if (!g) return;
-    const height = g.view.bottom - g.view.top - 20;
-    if (mode === "docked") {
-      const width = Math.min(MAX_W, g.pageLeft - g.view.left - GAP - 8);
-      this.place(this.gutter, g.pageLeft - GAP - width, g.view.top + 10, width, height);
-    } else if (mode === "floating") {
-      const width = Math.min(FLOAT_W, g.view.right - g.view.left - 24);
-      this.place(this.gutter, g.view.left + 8, g.view.top + 10, width, height);
+    const top = g.view.top + 8;
+    const height = g.view.bottom - g.view.top - 16;
+    if (showCard) {
+      const left = g.hostLeft + 6;
+      const cardW = mode === "docked" ? width - 12 : Math.min(width, g.hostWidth - 24);
+      this.place(this.gutter, left, top, cardW, height);
+      const r = this.gutter.getBoundingClientRect();
+      Object.assign(this.resizer.style, { left: `${Math.round(left + cardW + 1)}px`, top: `${Math.round(top)}px`, height: `${Math.round(Math.max(r.height, 60))}px` });
     } else if (mode === "pill") {
-      this.pill.style.left = `${g.view.left + 6}px`;
+      this.pill.style.left = `${g.hostLeft + 6}px`;
       this.pill.style.top = `${g.view.top + 48}px`;
       this.pill.setAttribute("data-hidden-pref", String(!visible));
     }
@@ -671,9 +758,9 @@ export class OutlineGutter {
         return;
       }
       // Clip to the reader view (incl. the gutter) so nothing paints over the toolbar
-      clipRect.setAttribute("x", String(g.view.left));
+      clipRect.setAttribute("x", String(g.hostLeft));
       clipRect.setAttribute("y", String(g.view.top));
-      clipRect.setAttribute("width", String(Math.max(0, g.view.right - g.view.left)));
+      clipRect.setAttribute("width", String(Math.max(0, g.view.right - g.hostLeft)));
       clipRect.setAttribute("height", String(Math.max(0, g.view.bottom - g.view.top)));
 
       const pad = region.box ? 5 : 0;
@@ -732,11 +819,28 @@ export class OutlineGutter {
 
   destroy(): void {
     clearInterval(this.timer);
+    this.releaseAll();
     this.cancelGuide();
     for (const u of this.unsubs) u();
     this.root.remove();
     this.doc.getElementById("zoteropi-outline-css")?.remove();
   }
+}
+
+/** Background of the pdf.js viewer, used for the strip the column occupies. */
+function viewerBackground(pv: any): string {
+  try {
+    const win = waive(pv._iframeWindow);
+    const doc = waive(win.document);
+    for (const el of [doc.getElementById("viewerContainer"), doc.getElementById("mainContainer"), doc.body, doc.documentElement]) {
+      if (!el) continue;
+      const bg = win.getComputedStyle(el).backgroundColor;
+      if (bg && bg !== "transparent" && !/rgba\(.*,\s*0\)$/.test(bg)) return bg;
+    }
+  } catch {
+    // fall through
+  }
+  return "";
 }
 
 function anchorLabel(a: OutlineAnchor): string {

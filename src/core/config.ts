@@ -38,6 +38,8 @@ export interface Settings {
   outlineModel: string;
   /** Outline navigator expanded (false = collapsed to the edge tab). */
   outlineVisible: boolean;
+  /** Outline column width in px (the PDF view shrinks by this much). */
+  outlineWidth: number;
   quickActions: QuickAction[];
 }
 
@@ -62,6 +64,7 @@ const DEFAULTS: Omit<Settings, "quickActions"> = {
   autoConclusion: true,
   outlineModel: "",
   outlineVisible: true,
+  outlineWidth: 300,
 };
 
 export function getPref<T = any>(key: string): T {
