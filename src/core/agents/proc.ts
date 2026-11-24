@@ -3,7 +3,11 @@
  * gets a minimal PATH, so executables are looked up on the login shell's PATH
  * plus the usual install locations (Homebrew, npm/bun/volta globals, ~/.local).
  */
-const { Subprocess } = ChromeUtils.importESModule("resource://gre/modules/Subprocess.sys.mjs");
+let subprocessModule: any = null;
+function sp(): any {
+  if (!subprocessModule) subprocessModule = ChromeUtils.importESModule("resource://gre/modules/sp().sys.mjs").Subprocess;
+  return subprocessModule;
+}
 
 export interface ChildProcess {
   /** Resolves with the exit code. */
@@ -32,7 +36,7 @@ function home(): string {
 
 function extraDirs(): string[] {
   if (isWindows()) {
-    const appData = Subprocess.getEnvironment().APPDATA || "";
+    const appData = sp().getEnvironment().APPDATA || "";
     return [appData && `${appData}\\npm`, `${home()}\\.local\\bin`].filter(Boolean);
   }
   const h = home();
@@ -52,10 +56,10 @@ async function readAll(pipe: any, limit = 1 << 20): Promise<string> {
 /** PATH of the user's login shell (once per app run, ≤ 8 s). */
 async function loginShellPath(): Promise<string> {
   if (isWindows()) return "";
-  const env = Subprocess.getEnvironment();
+  const env = sp().getEnvironment();
   const shell = env.SHELL && /^\/[\w/.-]+$/.test(env.SHELL) ? env.SHELL : "/bin/zsh";
   try {
-    const proc = await Subprocess.call({ command: shell, arguments: ["-ilc", 'printf "__ZPATH__%s__ZPATH__" "$PATH"'], stderr: "ignore" });
+    const proc = await sp().call({ command: shell, arguments: ["-ilc", 'printf "__ZPATH__%s__ZPATH__" "$PATH"'], stderr: "ignore" });
     const timer = setTimeout(() => proc.kill(), 8000);
     const out = await readAll(proc.stdout);
     clearTimeout(timer);
@@ -70,7 +74,7 @@ async function loginShellPath(): Promise<string> {
 export async function searchPath(): Promise<string> {
   if (!pathPromise) {
     pathPromise = loginShellPath().then((login) => {
-      const parts = [...login.split(sep()), ...String(Subprocess.getEnvironment().PATH || "").split(sep()), ...extraDirs()];
+      const parts = [...login.split(sep()), ...String(sp().getEnvironment().PATH || "").split(sep()), ...extraDirs()];
       return [...new Set(parts.filter(Boolean))].join(sep());
     });
   }
@@ -85,7 +89,7 @@ export async function resolveExecutable(name: string, configured?: string): Prom
     return custom;
   }
   try {
-    return await Subprocess.pathSearch(name, { PATH: await searchPath() });
+    return await sp().pathSearch(name, { PATH: await searchPath() });
   } catch {
     throw new Error(`在 PATH 中找不到 ${name}`);
   }
@@ -102,7 +106,7 @@ export interface SpawnOptions {
 
 export async function spawn(command: string, args: string[], opts: SpawnOptions): Promise<ChildProcess> {
   const environment = { PATH: await searchPath(), ...(opts.env || {}) };
-  const proc = await Subprocess.call({
+  const proc = await sp().call({
     command,
     arguments: args,
     workdir: opts.cwd || null,

@@ -48,7 +48,7 @@ export function listModels(): ModelInfo[] {
   );
   for (const e of cli) {
     const m = cliModel(e.id);
-    out.push({ id: e.id, name: e.name, reasoning: true, thinkingLevels: thinkingLevelsOf(m), builtin: true, images: CLI_PROVIDERS[e.provider].supportsImages, source: e.provider, group: CLI_PROVIDERS[e.provider].label });
+    out.push({ id: e.id, name: e.name, reasoning: true, thinkingLevels: thinkingLevelsOf(m).filter((l) => l !== "off"), builtin: true, images: CLI_PROVIDERS[e.provider].supportsImages, source: e.provider, group: CLI_PROVIDERS[e.provider].label });
   }
   return out;
 }
@@ -113,6 +113,8 @@ export function getModel(id?: string): Model<Api> {
 
 export function clampThinking(model: Model<Api>, level: string): string {
   const levels = thinkingLevelsOf(model);
+  // CLI agents always think; "off" means their lowest effort
+  if (isCliModel(model.id) && (level === "off" || !level)) return levels.find((l) => l !== "off") || "low";
   if (levels.includes(level)) return level;
   if (level === "off") return "off";
   // pick the closest supported level

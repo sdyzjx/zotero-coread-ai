@@ -3,9 +3,11 @@
  * transcript to SQLite and exposes snapshots to the UI.
  */
 import { Agent, type AgentEvent, type ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { CliAgentEngine } from "./agents/engine";
+import { setCliState } from "./agents/workspace";
 import { getSettings } from "./config";
 import { Emitter, globalEvents } from "./events";
-import { clampThinking, completeText, getModel, streamFn } from "./llm";
+import { clampThinking, completeText, getModel, isCliModel, streamFn } from "./llm";
 import { getItem, paperKey, paperTitle, type PaperRef } from "./paper";
 import { buildSystemPrompt } from "./prompt";
 import * as store from "./store";
@@ -51,9 +53,15 @@ function userText(m: any): string {
   return (m.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
 }
 
+/** pi's Agent, or the CLI engine that mirrors its surface. */
+type Engine = Agent | CliAgentEngine;
+
 export class SessionRuntime {
   readonly changes = new Emitter<SessionSnapshot>();
-  agent: Agent;
+  agent: Engine;
+  private readonly ref: PaperRef;
+  private readonly tools: ReturnType<typeof buildTools>;
+  private unsubscribe: () => void = () => {};
   meta: store.SessionMeta;
   private persisted: number;
   private committed: any[] = [];
@@ -71,32 +79,42 @@ export class SessionRuntime {
     this.meta = meta;
     this.persisted = messages.length;
     const ref: PaperRef = { libraryID: meta.libraryID, itemKey: meta.itemKey };
+    this.ref = ref;
     const settings = getSettings();
     const model = getModel(meta.model || settings.model);
     this.lastUser = userText([...messages].reverse().find((m) => m.role === "user"));
-    this.agent = new Agent({
-      initialState: {
-        systemPrompt: buildSystemPrompt(ref),
-        model,
-        thinkingLevel: clampThinking(model, settings.thinkingLevel) as ThinkingLevel,
-        tools: buildTools({
-          paper: ref,
-          sessionId: meta.id,
-          lastUserText: () => this.lastUser,
-          currentModel: () => this.agent.state.model,
-          notify: (ev) => {
-            globalEvents.emit({ ...ev, sessionId: meta.id, libraryID: meta.libraryID, itemKey: meta.itemKey });
-            if (ev.type === "session-updated") void this.reloadMeta();
-          },
-        }),
-        messages,
-      },
-      streamFn,
+    this.tools = buildTools({
+      paper: ref,
       sessionId: meta.id,
-      toolExecution: "parallel",
+      lastUserText: () => this.lastUser,
+      currentModel: () => this.agent.state.model,
+      notify: (ev) => {
+        globalEvents.emit({ ...ev, sessionId: meta.id, libraryID: meta.libraryID, itemKey: meta.itemKey });
+        if (ev.type === "session-updated") void this.reloadMeta();
+      },
     });
+    this.agent = this.createEngine(model, clampThinking(model, settings.thinkingLevel), messages);
     this.committed = clone(this.visibleMessages());
-    this.agent.subscribe((e) => this.onEvent(e));
+  }
+
+  /** Model source decides the engine: CLI agents vs pi's Agent (DeepSeek API). */
+  private createEngine(model: any, thinkingLevel: string, messages: any[]): Engine {
+    const systemPrompt = buildSystemPrompt(this.ref);
+    const engine: Engine = isCliModel(model.id)
+      ? new CliAgentEngine(this.meta.id, this.ref, { systemPrompt, model, thinkingLevel, tools: this.tools, messages })
+      : new Agent({
+          initialState: { systemPrompt, model, thinkingLevel: thinkingLevel as ThinkingLevel, tools: this.tools, messages },
+          streamFn,
+          sessionId: this.meta.id,
+          toolExecution: "parallel",
+        });
+    this.unsubscribe();
+    this.unsubscribe = (engine as any).subscribe((e: AgentEvent) => this.onEvent(e));
+    return engine;
+  }
+
+  get isCli(): boolean {
+    return this.agent instanceof CliAgentEngine;
   }
 
   /** Transcript without system messages (those are rebuilt on load). */
@@ -192,7 +210,8 @@ export class SessionRuntime {
     const content = text.trim();
     if (!content && !images.length) return -1;
     getSettings(); // validate prefs early
-    if (images.length && !modelSupportsImages(this.agent.state.model)) {
+    // CLI agents take images themselves (inline or as workspace files)
+    if (images.length && !this.isCli && !modelSupportsImages(this.agent.state.model)) {
       // e.g. DeepSeek V4 Pro is text-only: switch this session to a vision model.
       const vision = visionModelId(getSettings().quickModel);
       if (!vision) throw new Error("当前没有支持图片的模型（需要 DeepSeek V4.1 Flash）");
@@ -239,6 +258,18 @@ export class SessionRuntime {
 
   setModel(modelId: string, thinkingLevel?: string): void {
     const model = getModel(modelId);
+    if (isCliModel(modelId) !== this.isCli) {
+      // Switching between the API and a CLI agent: rebuild the engine on the same transcript.
+      if (this.isStreaming) throw new Error("请等当前回答结束后再切换模型来源");
+      const level = clampThinking(model, thinkingLevel || this.agent.state.thinkingLevel);
+      const messages = this.agent.state.messages;
+      this.agent.abort();
+      this.agent = this.createEngine(model, level, messages);
+      this.meta.model = modelId;
+      void store.updateSession(this.meta.id, { model: modelId });
+      this.scheduleEmit();
+      return;
+    }
     this.agent.state.model = model;
     if (thinkingLevel) this.agent.state.thinkingLevel = clampThinking(model, thinkingLevel) as ThinkingLevel;
     else this.agent.state.thinkingLevel = clampThinking(model, this.agent.state.thinkingLevel) as ThinkingLevel;
@@ -305,6 +336,7 @@ export class SessionRuntime {
     clearTimeout(this.conclusionTimer);
     clearTimeout(this.emitTimer);
     this.agent.abort();
+    this.unsubscribe();
     this.changes.clear();
   }
 }
@@ -372,6 +404,7 @@ export class SessionManager {
     this.runtimes.get(id)?.dispose();
     this.runtimes.delete(id);
     await store.deleteSession(id);
+    await setCliState(id, null).catch(() => undefined);
     if (meta) globalEvents.emit({ type: "sessions-changed", libraryID: meta.libraryID, itemKey: meta.itemKey });
   }
 
