@@ -43,6 +43,24 @@ export interface Settings {
   /** Outline column width in px (the PDF view shrinks by this much). */
   outlineWidth: number;
   quickActions: QuickAction[];
+  /** CLI agents (model ids "claude-code[:model]", "codex[:model]", "agy[:model]"). */
+  cliClaudeEnabled: boolean;
+  cliCodexEnabled: boolean;
+  cliAgyEnabled: boolean;
+  /** Executable paths ("" = search PATH and the login shell's PATH). */
+  cliClaudePath: string;
+  cliCodexPath: string;
+  cliAgyPath: string;
+  /** Extra model ids offered for each CLI, comma separated (the CLI's default model is always offered). */
+  cliClaudeModels: string;
+  cliCodexModels: string;
+  cliAgyModels: string;
+  /** Don't load the CLIs' own user settings / MCP servers / hooks (Claude Code, Codex). */
+  cliIsolateConfig: boolean;
+  /** Antigravity execution mode ("auto" lets it call tools without prompts; "" = CLI default). */
+  cliAgyMode: string;
+  /** Workspace root for CLI agents ("" = <Zotero data dir>/zoteropi). */
+  cliWorkspaceRoot: string;
 }
 
 const DEFAULTS: Omit<Settings, "quickActions"> = {
@@ -68,6 +86,18 @@ const DEFAULTS: Omit<Settings, "quickActions"> = {
   outlineThinking: "medium",
   outlineVisible: true,
   outlineWidth: 300,
+  cliClaudeEnabled: false,
+  cliCodexEnabled: false,
+  cliAgyEnabled: false,
+  cliClaudePath: "",
+  cliCodexPath: "",
+  cliAgyPath: "",
+  cliClaudeModels: "sonnet, opus, haiku",
+  cliCodexModels: "",
+  cliAgyModels: "",
+  cliIsolateConfig: true,
+  cliAgyMode: "auto",
+  cliWorkspaceRoot: "",
 };
 
 export function getPref<T = any>(key: string): T {
