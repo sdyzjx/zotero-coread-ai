@@ -68,9 +68,7 @@ class ZoteroPiAddon {
       this.quick.changes.on((job) => {
         if (!job) this.card?.close();
       }),
-      this.context.changes.on((ctx) => this.autoOutline(ctx)),
     );
-    this.autoOutline(this.context.get()); // a reader tab may already be selected
     const win = Zotero.getMainWindow();
     if (win?.document?.readyState === "complete") this.onMainWindowLoad(win);
   }
@@ -95,15 +93,6 @@ class ZoteroPiAddon {
     this.gutter = new OutlineGutter(win, this.outline, this.context);
     this.addMenu(win);
     win.addEventListener("keydown", this.onKey, true);
-  }
-
-  /** 文章脉络: analyze automatically the first time a PDF is opened in the reader. */
-  private autoOutline(ctx: ReturnType<ContextTracker["get"]>): void {
-    if (!ctx || ctx.source !== "reader" || !ctx.attachmentID || !getSettings().autoOutline) return;
-    const att = Zotero.Items.get(ctx.attachmentID);
-    if (!att?.isPDFAttachment?.()) return;
-    if (!getSettings().apiKey.trim()) return;
-    void this.outline.ensure(ctx.ref).catch((e) => Zotero.logError(e));
   }
 
   onMainWindowUnload(win: any): void {

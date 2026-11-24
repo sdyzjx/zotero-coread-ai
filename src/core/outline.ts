@@ -40,7 +40,8 @@ export class OutlineService {
   private states = new Map<string, OutlineState>();
   private queue: { ref: PaperRef; force: boolean }[] = [];
   private running = false;
-  private abort = new AbortController();
+  private disposed = false;
+  private current: { key: string; ctrl: AbortController } | null = null;
 
   state(ref: PaperRef): OutlineState {
     return this.states.get(paperKey(ref)) || { status: "idle" };
@@ -71,12 +72,6 @@ export class OutlineService {
     return this.state(ref);
   }
 
-  /** Load or (if missing) queue generation. Used for auto-analysis on open. */
-  async ensure(ref: PaperRef): Promise<void> {
-    const st = await this.load(ref);
-    if (st.status === "idle") this.generate(ref);
-  }
-
   generate(ref: PaperRef, force = false): void {
     const key = paperKey(ref);
     if (this.queue.some((q) => paperKey(q.ref) === key)) return;
@@ -86,6 +81,16 @@ export class OutlineService {
     // The paper the user is looking at goes first
     this.queue.unshift({ ref, force });
     void this.pump();
+  }
+
+  /** Stop a queued or running generation; the paper goes back to its cached outline (or idle). */
+  cancel(ref: PaperRef): void {
+    const key = paperKey(ref);
+    this.queue = this.queue.filter((q) => paperKey(q.ref) !== key);
+    if (this.current?.key === key) this.current.ctrl.abort();
+    this.states.delete(key);
+    this.changes.emit({ key, state: { status: "idle" } });
+    void this.load(ref);
   }
 
   async clear(ref: PaperRef): Promise<void> {
@@ -99,14 +104,20 @@ export class OutlineService {
     try {
       while (this.queue.length) {
         const { ref } = this.queue.shift()!;
+        const job = { key: paperKey(ref), ctrl: new AbortController() };
+        this.current = job;
         try {
-          const outline = await this.run(ref);
+          const outline = await this.run(ref, job.ctrl.signal);
+          if (job.ctrl.signal.aborted) continue;
           await kvSet(KV_PREFIX + paperKey(ref), JSON.stringify(outline));
           this.set(ref, { status: "ready", outline });
         } catch (e: any) {
-          if (this.abort.signal.aborted) return;
+          if (this.disposed) return;
+          if (job.ctrl.signal.aborted) continue; // cancelled: cancel() already reset the state
           Zotero.logError(e);
           this.set(ref, { status: "error", message: String(e?.message || e) });
+        } finally {
+          this.current = null;
         }
       }
     } finally {
@@ -114,10 +125,13 @@ export class OutlineService {
     }
   }
 
-  private async run(ref: PaperRef): Promise<PaperOutline> {
+  private async run(ref: PaperRef, signal: AbortSignal): Promise<PaperOutline> {
     const item = getItem(ref);
     if (!item) throw new Error("找不到该文献");
-    const stage = (s: string) => this.set(ref, { status: "loading", stage: s, started: Date.now() });
+    const started = Date.now();
+    const stage = (s: string) => {
+      if (!signal.aborted) this.set(ref, { status: "loading", stage: s, started });
+    };
     stage("读取全文…");
     const text = await getPaperText(item);
     if (!text.pages.some((p) => p.trim())) throw new Error("没有可读取的全文（需要带文字层的 PDF）");
@@ -128,7 +142,7 @@ export class OutlineService {
       title: meta.title || "",
       abstract: meta.abstract,
       language: settings.replyLanguage || "简体中文",
-      text: buildOutlineInput(text.pages, text.headings),
+      text: buildOutlineInput(text.pages, text.headings, 70_000),
     });
     let lastErr: any = null;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -137,9 +151,10 @@ export class OutlineService {
         { messages: [{ role: "user", content: prompt, timestamp: Date.now() }] },
         {
           model: modelId,
-          reasoning: clampThinking(getModel(modelId), attempt ? "low" : "high"),
-          signal: this.abort.signal,
-          maxTokens: 24000,
+          // Light thinking keeps it to well under a minute; the structure comes from the prompt
+          reasoning: attempt ? undefined : clampThinking(getModel(modelId), "low"),
+          signal,
+          maxTokens: 12000,
         },
       );
       try {
@@ -155,7 +170,8 @@ export class OutlineService {
   }
 
   dispose(): void {
-    this.abort.abort();
+    this.disposed = true;
+    this.current?.ctrl.abort();
     this.queue = [];
     this.changes.clear();
   }

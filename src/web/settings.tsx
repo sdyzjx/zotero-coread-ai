@@ -145,10 +145,8 @@ function App() {
 
       <section>
         <h2>文章脉络</h2>
-        <Field label="打开 PDF 时自动分析" hint="首次在阅读器中打开一篇论文时，在后台梳理背景 → 问题 → 相关工作 → Gap → 方法 → 实验 → 结果 → 结论（综述梳理发展脉络与研究分支），显示在 PDF 左侧空白处；结果会缓存">
-          <input type="checkbox" checked={s.autoOutline} onChange={(e) => set("autoOutline", (e.target as HTMLInputElement).checked)} />
-        </Field>
-        <Field label="在左侧显示脉络" hint="也可以用阅读器工具栏的 π≡ 按钮切换">
+        <div class="hint">阅读器左侧常驻一个悬浮的脉络导航，点击「生成文章脉络」后才会分析该论文（背景 → 问题 → 相关工作 → Gap → 方法 → 实验 → 结果 → 结论；综述梳理发展脉络与研究分支），结果会缓存。</div>
+        <Field label="展开脉络导航" hint="关闭则收起为左边缘的小标签；也可以用导航上的 ‹ 按钮或阅读器工具栏的 π≡ 切换">
           <input type="checkbox" checked={s.outlineVisible} onChange={(e) => set("outlineVisible", (e.target as HTMLInputElement).checked)} />
         </Field>
         <Field label="脉络分析模型" hint="默认使用「翻译 / 结论模型」；分析时开启思考以提高结构质量">

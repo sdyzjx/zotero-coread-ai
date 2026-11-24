@@ -1,9 +1,10 @@
 /**
- * 文章脉络 in the reader's left margin: a quiet, collapsible tree laid over the
- * blank area left of the PDF pages. Clicking a node scrolls the PDF to the
- * paragraph / figure and draws a translucent guide (connector + soft box) that
- * fades out by itself. When the margin is too narrow the outline collapses to a
- * small edge pill that opens it as a floating sheet.
+ * 文章脉络 navigator: a resident floating card on the left of the reader. It sits
+ * in the blank margin left of the PDF pages when there is room (translucent) and
+ * floats over the page edge otherwise; the user can collapse it to a small edge
+ * tab. The outline is generated only when the user asks for it. Clicking a node
+ * scrolls the PDF to the paragraph / figure and draws a translucent guide
+ * (connector + soft box) that fades out by itself.
  */
 import { getSettings, saveSettings } from "../config";
 import type { ContextTracker, PaperContext } from "../context";
@@ -16,6 +17,7 @@ import { ensureStylesheet, h } from "./dom";
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MIN_DOCK = 190;
 const MAX_W = 340;
+const FLOAT_W = 280;
 const GAP = 14;
 
 const SECTION_COLORS: Record<string, string> = {
@@ -51,6 +53,7 @@ interface Geometry {
   pv: any;
 }
 
+/** docked: in the page margin; floating: over the page edge; pill: collapsed by the user. */
 type Mode = "docked" | "floating" | "pill" | "none";
 
 export class OutlineGutter {
@@ -65,7 +68,7 @@ export class OutlineGutter {
   private reader: any = null;
   private outline: PaperOutline | null = null;
   private mode: Mode = "none";
-  private floatingOpen = false;
+  private loadingSince = 0;
   private expanded = new Map<string, Set<string>>();
   private rows = new Map<string, HTMLElement>();
   private activeId: string | null = null;
@@ -111,17 +114,7 @@ export class OutlineGutter {
     this.guideSvg.setAttribute("class", "zpo-guide");
     this.root.append(this.gutter, this.pill, this.guideSvg);
     doc.documentElement.appendChild(this.root);
-    // Close the floating sheet when clicking elsewhere
-    this.doc.addEventListener("pointerdown", this.onDocPointer, true);
   }
-
-  private onDocPointer = (e: Event) => {
-    if (this.mode !== "floating" || !this.floatingOpen) return;
-    const t = e.target as Node;
-    if (this.gutter.contains(t) || this.pill.contains(t)) return;
-    this.floatingOpen = false;
-    this.layout();
-  };
 
   /** The margin must not swallow scrolling: pass the wheel to the PDF when the outline can't scroll that way. */
   private onWheel(e: WheelEvent): void {
@@ -157,7 +150,6 @@ export class OutlineGutter {
     this.reader = isPdf ? reader : null;
     if (!sameKey) {
       this.cancelGuide();
-      this.floatingOpen = false;
       this.renderedKey = "";
       this.lastPage = -1;
     }
@@ -216,6 +208,8 @@ export class OutlineGutter {
   private tick(): void {
     this.layout();
     this.updateReadingPosition();
+    const el = this.gutter.querySelector(".zpo-elapsed");
+    if (el && this.loadingSince) el.textContent = `${Math.round((Date.now() - this.loadingSince) / 1000)}s`;
   }
 
   private layout(): void {
@@ -226,7 +220,7 @@ export class OutlineGutter {
       const avail = g.pageLeft - g.view.left - GAP - 8;
       if (!visible) mode = "pill";
       else if (avail >= MIN_DOCK) mode = "docked";
-      else mode = this.floatingOpen ? "floating" : "pill";
+      else mode = "floating";
     }
     if (mode !== this.mode) {
       this.mode = mode;
@@ -241,7 +235,7 @@ export class OutlineGutter {
       const width = Math.min(MAX_W, g.pageLeft - g.view.left - GAP - 8);
       this.place(this.gutter, g.pageLeft - GAP - width, g.view.top + 10, width, height);
     } else if (mode === "floating") {
-      const width = Math.min(MAX_W, g.view.right - g.view.left - 24);
+      const width = Math.min(FLOAT_W, g.view.right - g.view.left - 24);
       this.place(this.gutter, g.view.left + 8, g.view.top + 10, width, height);
     } else if (mode === "pill") {
       this.pill.style.left = `${g.view.left + 6}px`;
@@ -261,25 +255,17 @@ export class OutlineGutter {
   }
 
   private onPill(): void {
-    if (!getSettings().outlineVisible) {
-      saveSettings({ outlineVisible: true });
-      this.floatingOpen = true;
-    } else {
-      this.floatingOpen = !this.floatingOpen;
-    }
+    this.setExpanded(true);
+  }
+
+  private setExpanded(expanded: boolean): void {
+    saveSettings({ outlineVisible: expanded });
     this.layout();
   }
 
-  /** Toolbar / menu toggle. */
+  /** Toolbar / menu toggle: expand or collapse the navigator. */
   toggle(): void {
-    const visible = getSettings().outlineVisible;
-    if (visible && this.mode === "pill") {
-      this.floatingOpen = !this.floatingOpen;
-    } else {
-      saveSettings({ outlineVisible: !visible });
-      this.floatingOpen = !visible;
-    }
-    this.layout();
+    this.setExpanded(!getSettings().outlineVisible);
   }
 
   // ------------------------------------------------------------------ render
@@ -292,7 +278,9 @@ export class OutlineGutter {
     this.gutter.textContent = "";
     this.rows.clear();
     this.outline = state.status === "ready" ? state.outline : null;
+    this.loadingSince = state.status === "loading" ? state.started : 0;
     this.pill.setAttribute("data-state", state.status);
+    this.pill.title = state.status === "loading" ? "正在生成文章脉络…（点击展开）" : "展开文章脉络";
 
     const head = h(doc, "div", { class: "zpo-head" }, [
       h(doc, "span", { class: "zpo-logo", text: "π" }),
@@ -306,20 +294,21 @@ export class OutlineGutter {
     if (state.status === "ready" || state.status === "error") {
       head.append(this.btn("↻", "重新分析文章脉络", () => this.ctx && this.service.generate(this.ctx.ref, true)));
     }
-    head.append(
-      this.btn("✕", "隐藏文章脉络（左侧标签或阅读器工具栏 π≡ 可重新打开）", () => {
-        saveSettings({ outlineVisible: false });
-        this.floatingOpen = false;
-        this.layout();
-      }),
-    );
+    head.append(this.btn("‹", "收起（点击左边缘的「π 脉络」标签或阅读器工具栏 π≡ 重新展开）", () => this.setExpanded(false)));
     this.gutter.append(head);
 
     if (state.status === "loading") {
+      const cancel = h(doc, "button", { class: "zpo-link", text: "取消" });
+      cancel.addEventListener("click", () => this.ctx && this.service.cancel(this.ctx.ref));
       this.gutter.append(
         h(doc, "div", { class: "zpo-status" }, [
-          h(doc, "div", { class: "zpo-spinner" }),
-          h(doc, "div", { text: state.stage || "正在分析…" }),
+          h(doc, "div", { class: "zpo-progress" }, [
+            h(doc, "div", { class: "zpo-spinner" }),
+            h(doc, "span", { text: state.stage || "正在分析…" }),
+            h(doc, "span", { class: "zpo-elapsed", text: `${Math.round((Date.now() - state.started) / 1000)}s` }),
+            h(doc, "span", { class: "zpo-spacer" }),
+            cancel,
+          ]),
           h(doc, "div", { class: "zpo-skeleton" }, [1, 2, 3, 4, 5].map(() => h(doc, "div", { class: "zpo-skel-line" }))),
         ]),
       );
@@ -330,7 +319,7 @@ export class OutlineGutter {
       return;
     }
     if (state.status === "idle") {
-      const go = h(doc, "button", { class: "zpo-go", text: "分析文章脉络" });
+      const go = h(doc, "button", { class: "zpo-go", text: "生成文章脉络" });
       go.addEventListener("click", () => this.ctx && this.service.generate(this.ctx.ref));
       this.gutter.append(
         h(doc, "div", { class: "zpo-status" }, [
@@ -610,12 +599,7 @@ export class OutlineGutter {
       Zotero.logError(e);
       return;
     }
-    if (this.mode === "floating") {
-      // Get out of the way of the page; the guide starts at the pill instead
-      this.floatingOpen = false;
-      this.layout();
-    }
-    this.showGuide(region, this.mode === "docked" ? rowEl : this.pill);
+    this.showGuide(region, rowEl);
   }
 
   private cancelGuide(): void {
@@ -750,7 +734,6 @@ export class OutlineGutter {
     clearInterval(this.timer);
     this.cancelGuide();
     for (const u of this.unsubs) u();
-    this.doc.removeEventListener("pointerdown", this.onDocPointer, true);
     this.root.remove();
     this.doc.getElementById("zoteropi-outline-css")?.remove();
   }

@@ -52,11 +52,15 @@
 .zpo-gutter:hover {
   opacity: 1;
 }
+/* Over the page edge: a solid card that fades back while the mouse is elsewhere */
 .zpo-root[data-mode="floating"] .zpo-gutter {
   background: var(--zpo-bg-solid);
-  opacity: 1;
   border: 1px solid var(--zpo-line);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.12);
+  opacity: 0.72;
+}
+.zpo-root[data-mode="floating"] .zpo-gutter:hover {
+  opacity: 1;
 }
 
 .zpo-head {
@@ -405,6 +409,27 @@
 }
 .zpo-error {
   color: #c0504d;
+}
+.zpo-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.zpo-elapsed {
+  color: var(--zpo-faint);
+  font-variant-numeric: tabular-nums;
+}
+.zpo-link {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--zpo-accent);
+  cursor: pointer;
+}
+.zpo-link:hover {
+  text-decoration: underline;
 }
 .zpo-go {
   align-self: flex-start;
