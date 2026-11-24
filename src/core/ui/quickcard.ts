@@ -4,6 +4,7 @@
  */
 import { getPref, setPref } from "../config";
 import { clamp, ensureStylesheet, h } from "./dom";
+import { BRAND, logoMark } from "./mark";
 
 const MIN_W = 300;
 const MIN_H = 180;
@@ -47,7 +48,7 @@ export class QuickCard {
       return b;
     };
     const header = h(this.doc, "div", { class: "zp-header" }, [
-      h(this.doc, "span", { class: "zp-logo", text: "π" }),
+      h(this.doc, "span", { class: "zp-logo", title: BRAND }, [logoMark(this.doc, 12)]),
       this.titleEl,
       btn("⇱", "在聊天面板中继续", () => {
         this.onOpenPanel();

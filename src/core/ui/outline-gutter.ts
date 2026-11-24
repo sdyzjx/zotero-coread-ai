@@ -16,6 +16,7 @@ import { RELATION_LABELS, flattenOutline, type OutlineAnchor, type OutlineNode, 
 import { paperKey } from "../paper";
 import { findReader, waive } from "../reader-utils";
 import { ensureStylesheet, h } from "./dom";
+import { logoMark } from "./mark";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 /** Navigator column width bounds (px). */
@@ -218,7 +219,7 @@ export class OutlineGutter {
     this.gutter = h(doc, "div", { class: "zpo-gutter", hidden: "true" });
     this.body = h(doc, "div", { class: "zpo-body" });
     this.pill = h(doc, "div", { class: "zpo-pill", hidden: "true", title: "文章脉络" }, [
-      h(doc, "span", { class: "zpo-pill-logo", text: "π" }),
+      h(doc, "span", { class: "zpo-pill-logo" }, [logoMark(doc, 11)]),
       h(doc, "span", { class: "zpo-pill-text", text: "脉络" }),
     ]);
     this.pill.addEventListener("click", () => this.onPill());
@@ -495,7 +496,7 @@ export class OutlineGutter {
     if (this.headSig !== headSig || !this.headEl) {
       this.headSig = headSig;
       const head = h(doc, "div", { class: "zpo-head" }, [
-        h(doc, "span", { class: "zpo-logo", text: "π" }),
+        h(doc, "span", { class: "zpo-logo" }, [logoMark(doc, 11)]),
         h(doc, "span", { class: "zpo-heading", text: "文章脉络" }),
       ]);
       if (o) head.append(h(doc, "span", { class: "zpo-kind", text: o.kind === "survey" ? "综述" : "研究" }));
@@ -511,7 +512,7 @@ export class OutlineGutter {
       if (state.status === "ready" || state.status === "error") {
         head.append(this.btn("↻", "重新分析文章脉络", () => this.ctx && this.service.generate(this.ctx.ref, true)));
       }
-      head.append(this.btn("‹", "收起（点击左边缘的「π 脉络」标签或阅读器工具栏 π≡ 重新展开）", () => this.setExpanded(false)));
+      head.append(this.btn("‹", "收起（点击左边缘的「脉络」标签或阅读器工具栏的脉络按钮重新展开）", () => this.setExpanded(false)));
       this.headEl = head;
     }
 
@@ -1518,7 +1519,7 @@ export class OutlineGutter {
       });
       this.pop.append(b);
     };
-    this.pop.append(h(doc, "span", { class: "zpo-pop-logo", text: "π" }));
+    this.pop.append(h(doc, "span", { class: "zpo-pop-logo" }, [logoMark(doc, 13)]));
     for (const a of getSettings().quickActions) {
       add(a.label, a.mode === "translate" ? "翻译这句话" : a.prompt.slice(0, 80), () => this.runAction(a));
     }

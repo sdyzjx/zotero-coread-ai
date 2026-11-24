@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
-  "name": "Zotero Pi Agent",
+  "name": "CoRead AI",
   "version": "__VERSION__",
-  "description": "AI 阅读助手：基于 pi agent 的划词问答、翻译、自主批注与文章级对话",
-  "author": "zotero-pi-agent",
+  "description": "AI 伴读：与 AI 协同精读论文——引导注意力的文章脉络、划词 / 框图提问、自动批注，可接入 DeepSeek、Claude Code、Codex 与 Antigravity",
+  "author": "sdyzjx",
   "icons": {
     "48": "content/icons/icon.svg",
     "96": "content/icons/icon.svg"
@@ -11,9 +11,10 @@
   "applications": {
     "zotero": {
       "id": "zotero-pi-agent@zoteropi.local",
-      "update_url": "https://localhost/zotero-pi-agent/updates.json",
+      "update_url": "https://coread.doosam.uk/updates.json",
       "strict_min_version": "7.0",
       "strict_max_version": "10.*"
     }
-  }
+  },
+  "homepage_url": "https://coread.doosam.uk"
 }

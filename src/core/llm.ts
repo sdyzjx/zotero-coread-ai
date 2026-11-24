@@ -130,7 +130,7 @@ export function clampThinking(model: Model<Api>, level: string): string {
 
 function requireApiKey(): string {
   const key = getSettings().apiKey.trim();
-  if (!key) throw new Error("尚未配置 DeepSeek API Key，请在 Pi Agent 设置中填写。");
+  if (!key) throw new Error("尚未配置 DeepSeek API Key，请在 CoRead AI 设置中填写，或改用 Claude Code / Codex / Antigravity。");
   return key;
 }
 

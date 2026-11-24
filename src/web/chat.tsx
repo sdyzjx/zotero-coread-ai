@@ -276,7 +276,7 @@ function PanelApp() {
     return (
       <div class="app">
         <div class="empty">
-          <div class="empty-logo">π</div>
+          <img class="empty-logo" src="icons/icon.svg" alt="CoRead AI" />
           <p>在阅读器中打开一篇论文，或在文库中选中一篇文献，即可开始文章级对话。</p>
           <button class="link-btn" onClick={() => api.openSettings()}>
             设置

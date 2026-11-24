@@ -94,10 +94,10 @@ export function serverFor(run: RunState | null): McpServerImpl {
   return {
     name: MCP_SERVER_NAME,
     version: String(__PLUGIN_VERSION__),
-    instructions: "Tools of the Zotero Pi reading assistant: the current paper, its annotations, the Zotero library, vision, web and academic search.",
+    instructions: "Tools of CoRead AI, the Zotero co-reading assistant: the current paper, its annotations, the Zotero library, vision, web and academic search.",
     listTools: () => (run ? run.tools.map(toMcpTool) : []),
     async callTool(name, args, meta) {
-      if (!run) throw new Error("No active Zotero Pi session for this agent.");
+      if (!run) throw new Error("No active CoRead AI session for this agent.");
       const tool = run.tools.find((t) => t.name === name);
       if (!tool) throw new Error(`Unknown tool: ${name}`);
       const id = String((meta as any).toolUseId || `mcp_${Date.now().toString(36)}_${++run.seq}`);
