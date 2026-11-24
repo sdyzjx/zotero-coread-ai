@@ -275,8 +275,8 @@
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--sec) 16%, transparent);
-  color: var(--sec);
+  background: color-mix(in srgb, var(--sec) 22%, transparent);
+  color: color-mix(in srgb, var(--sec) 70%, var(--zpo-fg));
   font-weight: 600;
   font-size: 9.5px;
   display: inline-flex;
@@ -310,7 +310,7 @@
   display: block;
 }
 .zpo-d0 > .zpo-children {
-  border-left-color: color-mix(in srgb, var(--sec) 28%, transparent);
+  border-left-color: color-mix(in srgb, var(--sec) 40%, transparent);
 }
 .zpo-d1 > .zpo-row .zpo-title,
 .zpo-d2 > .zpo-row .zpo-title {
@@ -322,7 +322,7 @@
 
 /* abstract breakdown: role-coloured titles with a dot */
 .zpo-node[data-section="abstract"].zpo-d1 > .zpo-row .zpo-title-text {
-  color: color-mix(in srgb, var(--role) 85%, var(--zpo-fg));
+  color: color-mix(in srgb, var(--role) 68%, var(--zpo-fg));
   font-weight: 600;
 }
 .zpo-node[data-section="abstract"].zpo-d1 > .zpo-row .zpo-num {
@@ -349,7 +349,7 @@
   height: 7px;
   border-radius: 50%;
   background: var(--zpo-bg-solid);
-  border: 1.5px solid #4f9a9c;
+  border: 1.5px solid #e56eee;
   box-sizing: border-box;
 }
 
@@ -717,6 +717,16 @@
   color: var(--zpo-muted);
   cursor: default;
 }
+.zpo-pop-mark::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 2px;
+  background: var(--zpo-mark, var(--zpo-accent));
+  vertical-align: 0;
+}
 .zpo-pop-mark {
   border-left: 1px solid var(--zpo-line);
   border-radius: 0 5px 5px 0;
@@ -782,36 +792,37 @@
   overflow: visible;
   pointer-events: none;
 }
+/* Marks take the clicked node's representative colour (--zpo-guide), accent as fallback */
 .zpo-guide-box {
-  fill: var(--zpo-accent);
+  fill: var(--zpo-guide, var(--zpo-accent));
   fill-opacity: 0.06;
-  stroke: var(--zpo-accent);
-  stroke-opacity: 0.42;
+  stroke: color-mix(in srgb, var(--zpo-guide, var(--zpo-accent)) 80%, #555);
+  stroke-opacity: 0.5;
   stroke-width: 1.4;
 }
 /* The key sentence: clearly marked (tint + underline), the rest of the box stays soft */
 .zpo-guide-focus {
-  fill: var(--zpo-accent);
-  fill-opacity: 0.2;
+  fill: var(--zpo-guide, var(--zpo-accent));
+  fill-opacity: 0.3;
 }
 .zpo-guide-mark {
-  stroke: var(--zpo-accent);
-  stroke-opacity: 0.75;
+  stroke: color-mix(in srgb, var(--zpo-guide, var(--zpo-accent)) 85%, #333);
+  stroke-opacity: 0.8;
   stroke-width: 2;
   stroke-linecap: round;
 }
 .zpo-guide-line {
   fill: none;
-  stroke: var(--zpo-accent);
+  stroke: var(--zpo-guide, var(--zpo-accent));
   stroke-opacity: 0.5;
   stroke-width: 1.4;
   stroke-linecap: round;
 }
 .zpo-guide-dot {
-  fill: var(--zpo-accent);
+  fill: var(--zpo-guide, var(--zpo-accent));
   fill-opacity: 0.55;
 }
 .zpo-guide-start {
-  fill: var(--zpo-accent);
+  fill: var(--zpo-guide, var(--zpo-accent));
   fill-opacity: 0.45;
 }

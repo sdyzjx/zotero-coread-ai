@@ -24,21 +24,37 @@ const MAX_W = 640;
 /** Narrowest PDF area we accept before floating over the page instead of reserving a column. */
 const MIN_PDF_W = 380;
 
+/**
+ * Representative colour per role, taken from Zotero's standard annotation colours so the
+ * one-click highlights can be filtered by colour in Zotero: 背景 blue · Gap red · 方法 purple ·
+ * 结果 orange · 结论 green (plus gray / magenta / yellow for the remaining roles).
+ */
+const ZOTERO_COLORS = {
+  yellow: "#ffd400",
+  red: "#ff6666",
+  green: "#5fb236",
+  blue: "#2ea8e5",
+  purple: "#a28ae5",
+  magenta: "#e56eee",
+  orange: "#f19837",
+  gray: "#aaaaaa",
+};
+
 const SECTION_COLORS: Record<string, string> = {
-  abstract: "#8a8f98",
-  background: "#7c8db5",
-  traditional: "#a08c7a",
-  related: "#4f9a9c",
-  gap: "#d0695f",
-  method: "#6d5bd0",
-  experiment: "#7fa070",
-  results: "#c49a1f",
-  conclusion: "#8c7bb5",
-  scope: "#7c8db5",
-  evolution: "#4f9a9c",
-  taxonomy: "#6d5bd0",
-  comparison: "#c49a1f",
-  challenges: "#d0695f",
+  abstract: ZOTERO_COLORS.gray,
+  background: ZOTERO_COLORS.blue,
+  traditional: ZOTERO_COLORS.gray,
+  related: ZOTERO_COLORS.magenta,
+  gap: ZOTERO_COLORS.red,
+  method: ZOTERO_COLORS.purple,
+  experiment: ZOTERO_COLORS.yellow,
+  results: ZOTERO_COLORS.orange,
+  conclusion: ZOTERO_COLORS.green,
+  scope: ZOTERO_COLORS.blue,
+  evolution: ZOTERO_COLORS.magenta,
+  taxonomy: ZOTERO_COLORS.purple,
+  comparison: ZOTERO_COLORS.orange,
+  challenges: ZOTERO_COLORS.red,
 };
 
 /** Abstract roles reuse the colour of the matching outline section. */
@@ -68,6 +84,8 @@ export interface OutlineHost {
 
 interface Guide {
   region: AnchorRegion;
+  /** Representative colour of the node that was clicked (guide marks + one-click highlight). */
+  color: string;
   raf: number;
   /** Highlight box and key-sentence line boxes in main-window coordinates (last frame). */
   box: Box | null;
@@ -654,7 +672,7 @@ export class OutlineGutter {
       this.select(id);
       if (n.children.length && !this.expandedSet().has(id)) this.setOpen(id, true);
       const a = n.anchors.find((x) => x.quote || x.figure) || n.anchors[0];
-      if (a) void this.jump(a, row);
+      if (a) void this.jump(a, row, this.colorOf(id));
     });
     row.addEventListener("mouseenter", () => this.hoverArcs(id, true));
     row.addEventListener("mouseleave", () => this.hoverArcs(id, false));
@@ -707,7 +725,7 @@ export class OutlineGutter {
       chip.addEventListener("click", (e) => {
         e.stopPropagation();
         this.select(n.id);
-        void this.jump(a, row);
+        void this.jump(a, row, this.colorOf(n.id));
       });
       chips.append(chip);
     }
@@ -877,7 +895,16 @@ export class OutlineGutter {
 
   // ------------------------------------------------------------------ jump + guide
 
-  private async jump(anchor: OutlineAnchor, rowEl: HTMLElement): Promise<void> {
+  /** Representative colour of a node: abstract roles by role, everything else by section. */
+  private colorOf(id: string): string {
+    const el = this.rows.get(id);
+    const n = this.nodeData.get(id);
+    const section = el?.getAttribute("data-section") || "";
+    if (section === "abstract" && n && ROLE_COLORS[n.title]) return ROLE_COLORS[n.title];
+    return SECTION_COLORS[section] || ZOTERO_COLORS.purple;
+  }
+
+  private async jump(anchor: OutlineAnchor, rowEl: HTMLElement, color = ZOTERO_COLORS.purple): Promise<void> {
     const reader = this.reader;
     if (!reader) return;
     const region = await resolveAnchor(reader, anchor);
@@ -898,7 +925,7 @@ export class OutlineGutter {
       Zotero.logError(e);
       return;
     }
-    this.showGuide(region, rowEl);
+    this.showGuide(region, rowEl, color);
   }
 
   private cancelGuide(): void {
@@ -948,7 +975,7 @@ export class OutlineGutter {
    * marked (tint + underline), plus a connector from the outline node that fades after a few
    * seconds. The highlight itself stays until the user clicks elsewhere in the paper.
    */
-  private showGuide(region: AnchorRegion, from: HTMLElement): void {
+  private showGuide(region: AnchorRegion, from: HTMLElement, color: string): void {
     this.cancelGuide();
     const doc = this.doc;
     const svg = this.guideSvg;
@@ -965,6 +992,7 @@ export class OutlineGutter {
     clip.append(clipRect);
     defs.append(clip);
     const group = mk("g", { "clip-path": `url(#${clipId})` });
+    group.style.setProperty("--zpo-guide", color);
     const box = mk("rect", { class: "zpo-guide-box", rx: "6", ry: "6" });
     const focusRects = region.focus.slice(0, 16);
     const focus = focusRects.map(() => mk("rect", { class: "zpo-guide-focus", rx: "2", ry: "2" }));
@@ -977,7 +1005,7 @@ export class OutlineGutter {
 
     const LINE_HOLD = 2600;
     const FADE = 800;
-    const guide: Guide = { region, raf: 0, box: null, focus: [], ox: 0, oy: 0 };
+    const guide: Guide = { region, color, raf: 0, box: null, focus: [], ox: 0, oy: 0 };
     this.guide = guide;
     const t0 = this.win.performance.now();
     let sig = "";
@@ -1218,7 +1246,9 @@ export class OutlineGutter {
       add(a.label, a.mode === "translate" ? "翻译这句话" : a.prompt.slice(0, 80), () => this.runAction(a));
     }
     add("问 AI", "把这句话引用到右侧 AI 侧栏，输入你的问题", () => this.askPanel());
-    add("划重点", "把这句话保存为高亮批注", (b) => void this.highlightSentence(b), "zpo-pop-mark");
+    add("划重点", "用本节的代表颜色把这句话保存为高亮批注", (b) => void this.highlightSentence(b), "zpo-pop-mark");
+    const mark = this.pop.querySelector(".zpo-pop-mark") as HTMLElement;
+    mark.style.setProperty("--zpo-mark", this.guide?.color || ZOTERO_COLORS.purple);
   }
 
   private showPop(): void {
@@ -1297,7 +1327,7 @@ export class OutlineGutter {
         start: region.start,
         viewBox: region.viewBox,
         pageLabel: await getPageLabel(this.reader, region.pageIndex),
-      });
+      }, gd!.color);
       btn.textContent = "✓ 已划重点";
     } catch (e: any) {
       Zotero.logError(e);
