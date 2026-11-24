@@ -5,13 +5,14 @@
  */
 import { getSettings } from "./config";
 import { Emitter } from "./events";
-import { clampThinking, completeText, getModel } from "./llm";
+import { getModel, pickThinking, streamText } from "./llm";
 import {
   buildOutlineInput,
   buildOutlinePrompt,
   extractJson,
   normalizeOutline,
   parseFigureLabel,
+  parsePartialJson,
   validateAnchors,
   type OutlineAnchor,
   type PaperOutline,
@@ -25,7 +26,8 @@ import { buildCharIndex, findQuote, getRangeRects } from "./text";
 
 export type OutlineState =
   | { status: "idle" }
-  | { status: "loading"; stage: string; started: number }
+  /** `partial`: the outline streamed so far (the tree grows as it arrives); `rev` bumps on each update. */
+  | { status: "loading"; stage: string; started: number; partial?: PaperOutline; rev?: number }
   | { status: "ready"; outline: PaperOutline }
   | { status: "error"; message: string };
 
@@ -145,21 +147,46 @@ export class OutlineService {
       language: settings.replyLanguage || "简体中文",
       text: buildOutlineInput(text.pages, text.headings, 70_000),
     });
+    const totalPages = text.totalPages || text.pages.length;
     let lastErr: any = null;
     for (let attempt = 0; attempt < 2; attempt++) {
-      stage(attempt ? "重新梳理…" : "梳理文章脉络…");
-      const reply = await completeText(
+      stage(attempt ? "重新梳理…" : "思考中…");
+      let rev = 0;
+      let lastEmit = 0;
+      let lastSize = 0;
+      let writing = false;
+      const reply = await streamText(
         { messages: [{ role: "user", content: prompt, timestamp: Date.now() }] },
         {
           model: modelId,
-          // Light thinking keeps it to well under a minute; the structure comes from the prompt
-          reasoning: attempt ? undefined : clampThinking(getModel(modelId), "low"),
+          // Default 中 (medium); models without it use the next lower level (DeepSeek Flash: low)
+          reasoning: attempt ? undefined : pickThinking(getModel(modelId), settings.outlineThinking),
           signal,
-          maxTokens: 12000,
+          maxTokens: 16000,
+        },
+        (e) => {
+          if (signal.aborted || e.type !== "text") return;
+          if (!writing) {
+            writing = true;
+            stage("生成中…");
+          }
+          // Re-parse the growing JSON a few times per second and publish the partial tree
+          const now = Date.now();
+          if (now - lastEmit < 160 || e.text.length === lastSize) return;
+          lastEmit = now;
+          lastSize = e.text.length;
+          const raw = parsePartialJson(e.text);
+          if (!raw) return;
+          try {
+            const partial = normalizeOutline(raw, totalPages, modelId, true);
+            if (partial.sections.length) this.set(ref, { status: "loading", stage: "生成中…", started, partial, rev: ++rev });
+          } catch {
+            // wait for more text
+          }
         },
       );
       try {
-        const outline = normalizeOutline(extractJson(reply), text.totalPages || text.pages.length, modelId);
+        const outline = normalizeOutline(extractJson(reply), totalPages, modelId);
         stage("定位段落…");
         validateAnchors(outline, text.pages);
         return outline;

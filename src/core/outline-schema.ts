@@ -234,6 +234,61 @@ export function extractJson(text: string): any {
   }
 }
 
+/** Scan JSON text: whether it ends inside a string and the stack of open containers. */
+function scanJson(s: string): { inString: boolean; escape: boolean; stack: string[] } {
+  const stack: string[] = [];
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (c === "\\") escape = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === "{" || c === "[") stack.push(c);
+    else if (c === "}" || c === "]") stack.pop();
+  }
+  return { inString, escape, stack };
+}
+
+/**
+ * Parse the prefix of a streamed JSON object: close an open string, drop a dangling key /
+ * comma, and close open containers. Returns null when the prefix isn't parseable yet.
+ */
+export function parsePartialJson(text: string): any | null {
+  let s = String(text || "");
+  const fence = s.indexOf("```");
+  if (fence !== -1 && s.indexOf("{") > fence) s = s.slice(s.indexOf("{"));
+  const start = s.indexOf("{");
+  if (start === -1) return null;
+  s = s.slice(start).replace(/```\s*$/, "");
+  const first = scanJson(s);
+  if (first.inString) {
+    if (first.escape) s = s.slice(0, -1);
+    s += '"';
+  }
+  // Trailing junk: dangling `"key":`, `"key"` right after { or , (an unfinished key), or a comma
+  for (let k = 0; k < 4; k++) {
+    const before = s;
+    s = s
+      .replace(/,?\s*"(?:[^"\\]|\\.)*"\s*:\s*$/, "")
+      .replace(/([{,])\s*"(?:[^"\\]|\\.)*"\s*$/, "$1")
+      .replace(/,\s*$/, "")
+      .replace(/:\s*$/, "");
+    if (s === before) break;
+  }
+  const { stack } = scanJson(s);
+  const closed = s + stack.reverse().map((c) => (c === "{" ? "}" : "]")).join("");
+  try {
+    return JSON.parse(closed);
+  } catch {
+    return null;
+  }
+}
+
 function clipText(s: any, n: number): string {
   const t = String(s ?? "")
     .replace(/\s+/g, " ")
@@ -252,7 +307,8 @@ function normAnchor(a: any, totalPages: number): OutlineAnchor | null {
   return out;
 }
 
-export function normalizeOutline(raw: any, totalPages: number, model = ""): PaperOutline {
+/** `partial`: a streamed prefix — no error for missing sections. */
+export function normalizeOutline(raw: any, totalPages: number, model = "", partial = false): PaperOutline {
   if (!raw || typeof raw !== "object") throw new Error("脉络格式无效");
   const kind: PaperKind = raw.kind === "survey" ? "survey" : "research";
   const defs = sectionDefs(kind);
@@ -295,7 +351,7 @@ export function normalizeOutline(raw: any, totalPages: number, model = ""): Pape
     n.title = def.title;
     sections.push({ ...n, key: def.key });
   }
-  if (!sections.length) throw new Error("模型没有返回任何章节");
+  if (!sections.length && !partial) throw new Error("模型没有返回任何章节");
 
   const ids = new Set<string>();
   const walk = (n: OutlineNode) => {

@@ -375,6 +375,83 @@
   }
 }
 
+.zpo-sum[hidden] {
+  display: none !important;
+}
+
+/* ---------------------------------------------------------------- growing tree (streaming) */
+/* A small branch from the parent's guide line to each child */
+.zpo-children > .zpo-node::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 11px;
+  width: 6px;
+  height: 1px;
+  background: var(--zpo-line);
+  transform-origin: left center;
+}
+/* New node: the branch extends first, then the row unfolds from the left */
+.zpo-grow::before {
+  animation: zpo-branch 0.28s ease-out both;
+}
+.zpo-grow > .zpo-row {
+  animation: zpo-grow-row 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) 0.08s both;
+}
+.zpo-d0.zpo-grow > .zpo-row .zpo-num {
+  animation: zpo-pop 0.5s cubic-bezier(0.3, 1.6, 0.5, 1) 0.05s both;
+}
+.zpo-grow > .zpo-children {
+  animation: zpo-line-down 0.6s ease-out 0.2s both;
+  transform-origin: top;
+}
+@keyframes zpo-branch {
+  from { transform: scaleX(0); }
+}
+@keyframes zpo-grow-row {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+    clip-path: inset(0 100% 0 0);
+  }
+  55% { opacity: 1; }
+  to {
+    opacity: 1;
+    transform: none;
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes zpo-pop {
+  from { transform: scale(0); }
+}
+@keyframes zpo-line-down {
+  from { clip-path: inset(0 0 100% 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+.zpo-sum-in {
+  animation: zpo-fade-in 0.35s ease both;
+}
+@keyframes zpo-fade-in {
+  from { opacity: 0; transform: translateY(-2px); }
+}
+/* Growing tip after the last node while the outline streams */
+.zpo-body.zpo-streaming .zpo-tree::after {
+  content: "";
+  display: block;
+  width: 26px;
+  height: 6px;
+  margin: 8px 0 4px 22px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--zpo-accent-soft), var(--zpo-accent), var(--zpo-accent-soft));
+  background-size: 200% 100%;
+  animation: zpo-shimmer 1s linear infinite;
+  opacity: 0.6;
+}
+.zpo-status-compact {
+  padding-top: 2px;
+  padding-bottom: 4px;
+}
+
 /* anchor + relation chips: only for the hovered / active node */
 .zpo-anchors,
 .zpo-rels {

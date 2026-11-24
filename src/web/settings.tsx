@@ -149,7 +149,15 @@ function App() {
         <Field label="展开脉络导航" hint="关闭则收起为左边缘的小标签；也可以用导航上的 ‹ 按钮或阅读器工具栏的 π≡ 切换">
           <input type="checkbox" checked={s.outlineVisible} onChange={(e) => set("outlineVisible", (e.target as HTMLInputElement).checked)} />
         </Field>
-        <Field label="脉络分析模型" hint="默认使用「翻译 / 结论模型」；分析时开启思考以提高结构质量">
+        <Field label="脉络思考强度" hint="默认「中」；模型不支持的强度会改用较低一档（DeepSeek Flash 只有 低 / 高 / 最大，「中」按「低」运行）。强度越高结构越好，但出结果越慢">
+          <select value={s.outlineThinking} onChange={(e) => set("outlineThinking", (e.target as HTMLSelectElement).value)}>
+            <option value="off">关闭</option>
+            <option value="low">低</option>
+            <option value="medium">中（默认）</option>
+            <option value="high">高</option>
+          </select>
+        </Field>
+        <Field label="脉络分析模型" hint="默认使用「翻译 / 结论模型」">
           <select value={s.outlineModel} onChange={(e) => set("outlineModel", (e.target as HTMLSelectElement).value)}>
             <option value="">与翻译 / 结论模型相同</option>
             {models.map((m) => (

@@ -36,6 +36,8 @@ export interface Settings {
   autoConclusion: boolean;
   /** Model for outline analysis ("" = quick model). */
   outlineModel: string;
+  /** Thinking level for outline analysis (falls back to the next lower level the model supports). */
+  outlineThinking: string;
   /** Outline navigator expanded (false = collapsed to the edge tab). */
   outlineVisible: boolean;
   /** Outline column width in px (the PDF view shrinks by this much). */
@@ -63,6 +65,7 @@ const DEFAULTS: Omit<Settings, "quickActions"> = {
   annotationTag: "AI",
   autoConclusion: true,
   outlineModel: "",
+  outlineThinking: "medium",
   outlineVisible: true,
   outlineWidth: 300,
 };

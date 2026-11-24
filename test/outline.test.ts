@@ -206,3 +206,23 @@ test("abstract breakdown is the first section for both kinds", () => {
     assert.equal(o.sections[0].children[0].title, "背景");
   }
 });
+
+test("parsePartialJson parses streamed prefixes", async () => {
+  const { parsePartialJson } = await import("../src/core/outline-schema.ts");
+  const full = JSON.stringify({ kind: "research", one_line: "x", sections: [{ key: "abstract", summary: "摘要", children: [{ id: "a1", title: "背景", summary: "VLA \"quoted\" text" }] }] });
+  let lastSections = 0;
+  for (let i = 1; i <= full.length; i++) {
+    const v = parsePartialJson(full.slice(0, i));
+    if (v && Array.isArray(v.sections)) {
+      assert.ok(v.sections.length >= lastSections, "monotonic");
+      lastSections = v.sections.length;
+    }
+  }
+  assert.deepEqual(parsePartialJson(full), JSON.parse(full));
+  assert.deepEqual(parsePartialJson('{"kind": "survey", "sections": [{"key": "scope", "summ'), { kind: "survey", sections: [{ key: "scope" }] });
+  assert.deepEqual(parsePartialJson('```json\n{"a": "partial str'), { a: "partial str" });
+  assert.equal(parsePartialJson("no json"), null);
+  const o = normalizeOutline(parsePartialJson('{"kind":"research","sections":[{"key":"gap","summary":"g"},{"key":"method","summ'), 3, "", true);
+  assert.deepEqual(o.sections.map((s) => s.key), ["gap", "method"], "a section shows as soon as its key arrives");
+  assert.equal(normalizeOutline({ kind: "research", sections: [] }, 1, "", true).sections.length, 0);
+});

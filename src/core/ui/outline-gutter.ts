@@ -12,7 +12,7 @@ import type { Selection } from "../quick";
 import { getPageLabel } from "../reader-utils";
 import type { ContextTracker, PaperContext } from "../context";
 import { resolveAnchor, type AnchorRegion, type OutlineService, type OutlineState } from "../outline";
-import { RELATION_LABELS, flattenOutline, type OutlineAnchor, type OutlineNode, type PaperOutline } from "../outline-schema";
+import { RELATION_LABELS, flattenOutline, type OutlineAnchor, type OutlineNode, type OutlineSection, type PaperOutline } from "../outline-schema";
 import { paperKey } from "../paper";
 import { findReader, waive } from "../reader-utils";
 import { ensureStylesheet, h } from "./dom";
@@ -120,6 +120,12 @@ export class OutlineGutter {
   private reserved = new Set<any>();
   private expanded = new Map<string, Set<string>>();
   private rows = new Map<string, HTMLElement>();
+  /** Latest data per node id (handlers read from here, so streamed updates take effect). */
+  private nodeData = new Map<string, OutlineNode>();
+  /** Section ids already shown per paper (only first appearance auto-expands). */
+  private seen = new Map<string, Set<string>>();
+  private tree: HTMLElement | null = null;
+  private treeKey = "";
   private activeId: string | null = null;
   private timer: any = null;
   private guide: Guide | null = null;
@@ -410,77 +416,90 @@ export class OutlineGutter {
   // ------------------------------------------------------------------ render
 
   private render(state: OutlineState): void {
-    const key = this.ctx ? `${paperKey(this.ctx.ref)}|${state.status}|${state.status === "ready" ? state.outline.created : state.status === "loading" ? state.stage : state.status === "error" ? state.message : ""}` : "";
+    const pk = this.ctx ? paperKey(this.ctx.ref) : "";
+    const detail =
+      state.status === "ready"
+        ? state.outline.created
+        : state.status === "loading"
+          ? `${state.stage}|${state.rev || 0}`
+          : state.status === "error"
+            ? state.message
+            : "";
+    const key = `${pk}|${state.status}|${detail}`;
     if (key === this.renderedKey) return;
     this.renderedKey = key;
     const doc = this.doc;
-    this.gutter.textContent = "";
-    this.rows.clear();
-    this.outline = state.status === "ready" ? state.outline : null;
-    this.loadingSince = state.status === "loading" ? state.started : 0;
+    const streaming = state.status === "loading";
+    this.outline = state.status === "ready" ? state.outline : streaming ? state.partial || null : null;
+    this.loadingSince = streaming ? state.started : 0;
     this.pill.setAttribute("data-state", state.status);
-    this.pill.title = state.status === "loading" ? "正在生成文章脉络…（点击展开）" : "展开文章脉络";
+    this.pill.title = streaming ? "正在生成文章脉络…（点击展开）" : "展开文章脉络";
 
+    // Header
     const head = h(doc, "div", { class: "zpo-head" }, [
       h(doc, "span", { class: "zpo-logo", text: "π" }),
       h(doc, "span", { class: "zpo-heading", text: "文章脉络" }),
     ]);
     if (this.outline) head.append(h(doc, "span", { class: "zpo-kind", text: this.outline.kind === "survey" ? "综述" : "研究" }));
     head.append(h(doc, "span", { class: "zpo-spacer" }));
-    if (this.outline) {
-      head.append(this.btn("⊟", "全部折叠 / 展开", () => this.toggleAll()));
-    }
+    if (state.status === "ready") head.append(this.btn("⊟", "全部折叠 / 展开", () => this.toggleAll()));
     if (state.status === "ready" || state.status === "error") {
       head.append(this.btn("↻", "重新分析文章脉络", () => this.ctx && this.service.generate(this.ctx.ref, true)));
     }
     head.append(this.btn("‹", "收起（点击左边缘的「π 脉络」标签或阅读器工具栏 π≡ 重新展开）", () => this.setExpanded(false)));
-    this.gutter.append(head);
 
-    if (state.status === "loading") {
+    // Status line
+    let status: HTMLElement | null = null;
+    if (streaming) {
       const cancel = h(doc, "button", { class: "zpo-link", text: "取消" });
       cancel.addEventListener("click", () => this.ctx && this.service.cancel(this.ctx.ref));
-      this.gutter.append(
-        h(doc, "div", { class: "zpo-status" }, [
-          h(doc, "div", { class: "zpo-progress" }, [
-            h(doc, "div", { class: "zpo-spinner" }),
-            h(doc, "span", { text: state.stage || "正在分析…" }),
-            h(doc, "span", { class: "zpo-elapsed", text: `${Math.round((Date.now() - state.started) / 1000)}s` }),
-            h(doc, "span", { class: "zpo-spacer" }),
-            cancel,
-          ]),
-          h(doc, "div", { class: "zpo-skeleton" }, [1, 2, 3, 4, 5].map(() => h(doc, "div", { class: "zpo-skel-line" }))),
+      status = h(doc, "div", { class: "zpo-status" + (this.outline ? " zpo-status-compact" : "") }, [
+        h(doc, "div", { class: "zpo-progress" }, [
+          h(doc, "div", { class: "zpo-spinner" }),
+          h(doc, "span", { text: state.stage || "正在分析…" }),
+          h(doc, "span", { class: "zpo-elapsed", text: `${Math.round((Date.now() - state.started) / 1000)}s` }),
+          h(doc, "span", { class: "zpo-spacer" }),
+          cancel,
         ]),
-      );
-      return;
-    }
-    if (state.status === "error") {
-      this.gutter.append(h(doc, "div", { class: "zpo-status zpo-error" }, [h(doc, "div", { text: state.message })]));
-      return;
-    }
-    if (state.status === "idle") {
+      ]);
+      if (!this.outline) status.append(h(doc, "div", { class: "zpo-skeleton" }, [1, 2, 3, 4, 5].map(() => h(doc, "div", { class: "zpo-skel-line" }))));
+    } else if (state.status === "error") {
+      status = h(doc, "div", { class: "zpo-status zpo-error" }, [h(doc, "div", { text: state.message })]);
+    } else if (state.status === "idle") {
       const go = h(doc, "button", { class: "zpo-go", text: "生成文章脉络" });
       go.addEventListener("click", () => this.ctx && this.service.generate(this.ctx.ref));
-      this.gutter.append(
-        h(doc, "div", { class: "zpo-status" }, [
-          h(doc, "div", { text: "梳理背景 → 问题 → 相关工作 → Gap → 方法 → 实验 → 结果 → 结论，点击即可跳转到原文。" }),
-          go,
-        ]),
-      );
-      return;
+      status = h(doc, "div", { class: "zpo-status" }, [
+        h(doc, "div", { text: "梳理摘要 → 背景 → 问题 → 相关工作 → Gap → 方法 → 实验 → 结果 → 结论，点击即可跳转到原文。" }),
+        go,
+      ]);
     }
 
-    const o = state.outline;
-    if (o.oneLine) this.gutter.append(h(doc, "div", { class: "zpo-one", text: o.oneLine }));
-    this.body = h(doc, "div", { class: "zpo-body" });
-    const tree = h(doc, "div", { class: "zpo-tree" + (o.relations.length ? " zpo-has-arcs" : "") });
-    o.sections.forEach((s, i) => tree.append(this.renderNode(s, 0, String(i + 1), s.key)));
-    this.body.append(tree);
-    if (o.relations.length) {
-      const arcs = doc.createElementNS(SVG_NS, "svg");
-      arcs.setAttribute("class", "zpo-arcs");
-      this.body.append(arcs);
+    // Tree: kept across updates so streamed nodes grow in place
+    const o = this.outline;
+    if (o) {
+      if (this.treeKey !== pk || !this.body.isConnected || !this.tree) {
+        this.rows.clear();
+        this.body = h(doc, "div", { class: "zpo-body" });
+        this.tree = h(doc, "div", { class: "zpo-tree" });
+        this.body.append(this.tree);
+        this.treeKey = pk;
+      }
+      this.reconcile(o, streaming);
+    } else {
+      this.rows.clear();
+      this.tree = null;
+      this.treeKey = "";
     }
-    this.gutter.append(this.body);
+
+    // Assemble (re-appending the same body keeps its nodes and scroll position)
+    const parts: HTMLElement[] = [head];
+    if (status) parts.push(status);
+    if (o?.oneLine) parts.push(h(doc, "div", { class: "zpo-one", text: o.oneLine }));
+    if (o) parts.push(this.body);
+    const scroll = this.body.scrollTop;
+    this.gutter.replaceChildren(...parts);
+    this.body.scrollTop = scroll;
+    this.body.classList.toggle("zpo-streaming", streaming);
     this.applyActive();
     this.win.requestAnimationFrame(() => this.drawArcs());
   }
@@ -489,79 +508,147 @@ export class OutlineGutter {
     const key = this.ctx ? paperKey(this.ctx.ref) : "";
     let set = this.expanded.get(key);
     if (!set) {
-      set = new Set(this.outline?.sections.map((s) => s.id) || []);
+      set = new Set();
       this.expanded.set(key, set);
     }
     return set;
   }
 
-  private renderNode(n: OutlineNode, depth: number, num: string, section: string): HTMLElement {
-    const doc = this.doc;
-    const expanded = this.expandedSet();
-    const hasKids = n.children.length > 0;
-    const el = h(doc, "div", {
-      class: `zpo-node zpo-d${depth}` + (hasKids ? " zpo-has-kids" : "") + (expanded.has(n.id) ? " zpo-open" : ""),
-      "data-id": n.id,
-      "data-section": section,
-    });
-    if (depth === 0) el.setAttribute("style", `--sec: ${SECTION_COLORS[section] || "#6d5bd0"}`);
-    else if (section === "abstract" && depth === 1) el.setAttribute("style", `--role: ${ROLE_COLORS[n.title] || "#8a8f98"}`);
+  /** Sync the tree DOM with the outline; new nodes get the grow animation while streaming. */
+  private reconcile(o: PaperOutline, animate: boolean): void {
+    this.nodeData.clear();
+    for (const f of flattenOutline(o)) this.nodeData.set(f.node.id, f.node);
+    const tree = this.tree!;
+    tree.classList.toggle("zpo-has-arcs", o.relations.length > 0);
+    this.reconcileList(tree, o.sections, 0, "", "", animate);
+    let arcs = this.body.querySelector(".zpo-arcs");
+    if (o.relations.length && !arcs) {
+      arcs = this.doc.createElementNS(SVG_NS, "svg");
+      arcs.setAttribute("class", "zpo-arcs");
+      this.body.append(arcs);
+    } else if (!o.relations.length && arcs) arcs.remove();
+  }
 
-    const twisty = h(doc, "span", { class: "zpo-twisty", text: hasKids ? "›" : "" });
+  private reconcileList(container: HTMLElement, nodes: OutlineNode[], depth: number, prefix: string, sectionKey: string, animate: boolean): void {
+    const pk = this.ctx ? paperKey(this.ctx.ref) : "";
+    let seen = this.seen.get(pk);
+    if (!seen) this.seen.set(pk, (seen = new Set()));
+    nodes.forEach((n, i) => {
+      const num = depth === 0 ? String(i + 1) : `${prefix}.${i + 1}`;
+      const section = depth === 0 ? (n as OutlineSection).key : sectionKey;
+      let el = this.rows.get(n.id);
+      if (!el || el.parentElement !== container) {
+        el?.remove();
+        el = this.createNode(n.id, depth, section);
+        // Sections start expanded the first time they appear
+        if (depth === 0 && !seen!.has(n.id)) this.expandedSet().add(n.id);
+        seen!.add(n.id);
+        if (animate) {
+          const grown = el;
+          grown.classList.add("zpo-grow");
+          grown.addEventListener("animationend", () => grown.classList.remove("zpo-grow"), { once: true });
+        }
+        this.rows.set(n.id, el);
+      }
+      if (container.children[i] !== el) container.insertBefore(el, container.children[i] || null);
+      this.updateNode(el, n, depth, num, section);
+      const kids = el.querySelector(":scope > .zpo-children") as HTMLElement;
+      this.reconcileList(kids, n.children, depth + 1, num, section, animate);
+    });
+    while (container.children.length > nodes.length) {
+      const last = container.lastElementChild as HTMLElement;
+      const id = last.getAttribute("data-id");
+      if (id) this.rows.delete(id);
+      last.remove();
+    }
+  }
+
+  /** Static skeleton of a node; handlers read the latest data from nodeData. */
+  private createNode(id: string, depth: number, section: string): HTMLElement {
+    const doc = this.doc;
+    const el = h(doc, "div", { class: `zpo-node zpo-d${depth}`, "data-id": id, "data-section": section });
+    const twisty = h(doc, "span", { class: "zpo-twisty" });
     twisty.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (hasKids) this.setOpen(n.id, !expanded.has(n.id));
+      const n = this.nodeData.get(id);
+      if (n?.children.length) this.setOpen(id, !this.expandedSet().has(id));
     });
-    const title = h(doc, "div", { class: "zpo-title" }, [h(doc, "span", { class: "zpo-num", text: depth < 2 ? num : "·" }), h(doc, "span", { class: "zpo-title-text", text: n.title })]);
-    if (n.period) title.append(h(doc, "span", { class: "zpo-period", text: n.period }));
-    const text = h(doc, "div", { class: "zpo-text" }, [title]);
-    if (n.summary && n.summary !== n.title) text.append(h(doc, "div", { class: "zpo-sum", text: n.summary }));
-
-    if (n.anchors.length) {
-      const chips = h(doc, "div", { class: "zpo-anchors" });
-      for (const a of n.anchors) {
-        const chip = h(doc, "span", { class: "zpo-chip", text: anchorLabel(a), title: a.quote ? `“${a.quote}”` : a.caption || `第 ${a.page} 页` });
-        chip.addEventListener("click", (e) => {
-          e.stopPropagation();
-          this.select(n.id);
-          void this.jump(a, row);
-        });
-        chips.append(chip);
-      }
-      text.append(chips);
-    }
-
-    const rels = this.relationsOf(n.id);
-    if (rels.length) {
-      const box = h(doc, "div", { class: "zpo-rels" });
-      for (const r of rels) {
-        const chip = h(doc, "span", { class: `zpo-rel zpo-rel-${r.type}`, text: `${r.dir === "out" ? "→" : "←"} ${RELATION_LABELS[r.type]} · ${r.partner.title}`, title: r.label || "" });
-        chip.addEventListener("click", (e) => {
-          e.stopPropagation();
-          this.reveal(r.partner.id);
-        });
-        box.append(chip);
-      }
-      text.append(box);
-    }
-
+    const title = h(doc, "div", { class: "zpo-title" }, [h(doc, "span", { class: "zpo-num" }), h(doc, "span", { class: "zpo-title-text" })]);
+    const text = h(doc, "div", { class: "zpo-text" }, [title, h(doc, "div", { class: "zpo-sum", hidden: "true" }), h(doc, "div", { class: "zpo-anchors" }), h(doc, "div", { class: "zpo-rels" })]);
     const row = h(doc, "div", { class: "zpo-row" }, [twisty, text]);
     row.addEventListener("click", () => {
-      this.select(n.id);
-      if (hasKids && !expanded.has(n.id)) this.setOpen(n.id, true);
+      const n = this.nodeData.get(id);
+      if (!n) return;
+      this.select(id);
+      if (n.children.length && !this.expandedSet().has(id)) this.setOpen(id, true);
       const a = n.anchors.find((x) => x.quote || x.figure) || n.anchors[0];
       if (a) void this.jump(a, row);
     });
-    row.addEventListener("mouseenter", () => this.hoverArcs(n.id, true));
-    row.addEventListener("mouseleave", () => this.hoverArcs(n.id, false));
-    this.rows.set(n.id, el);
-    el.append(row);
-    if (hasKids) {
-      const kids = h(doc, "div", { class: "zpo-children" });
-      n.children.forEach((c, i) => kids.append(this.renderNode(c, depth + 1, `${num}.${i + 1}`, section)));
-      el.append(kids);
-    }
+    row.addEventListener("mouseenter", () => this.hoverArcs(id, true));
+    row.addEventListener("mouseleave", () => this.hoverArcs(id, false));
+    el.append(row, h(doc, "div", { class: "zpo-children" }));
     return el;
+  }
+
+  private updateNode(el: HTMLElement, n: OutlineNode, depth: number, num: string, section: string): void {
+    const doc = this.doc;
+    const hasKids = n.children.length > 0;
+    el.classList.toggle("zpo-has-kids", hasKids);
+    el.classList.toggle("zpo-open", this.expandedSet().has(n.id));
+    if (depth === 0) el.style.setProperty("--sec", SECTION_COLORS[section] || "#6d5bd0");
+    else if (section === "abstract" && depth === 1) el.style.setProperty("--role", ROLE_COLORS[n.title] || "#8a8f98");
+    const row = el.firstElementChild as HTMLElement;
+    const setText = (sel: string, v: string) => {
+      const x = row.querySelector(sel) as HTMLElement;
+      if (x.textContent !== v) x.textContent = v;
+      return x;
+    };
+    setText(".zpo-twisty", hasKids ? "›" : "");
+    setText(".zpo-num", depth < 2 ? num : "·");
+    setText(".zpo-title-text", n.title);
+    const title = row.querySelector(".zpo-title") as HTMLElement;
+    let period = title.querySelector(".zpo-period") as HTMLElement | null;
+    if (n.period) {
+      if (!period) title.append((period = h(doc, "span", { class: "zpo-period" })));
+      if (period.textContent !== n.period) period.textContent = n.period;
+    } else period?.remove();
+    const sum = row.querySelector(".zpo-sum") as HTMLElement;
+    const sumText = n.summary && n.summary !== n.title ? n.summary : "";
+    if (sum.textContent !== sumText) {
+      if (sumText && sum.hidden) {
+        sum.classList.add("zpo-sum-in");
+        sum.addEventListener("animationend", () => sum.classList.remove("zpo-sum-in"), { once: true });
+      }
+      sum.textContent = sumText;
+      sum.hidden = !sumText;
+    }
+
+    // Anchor chips and relation chips: rebuild only when they change
+    const rels = this.relationsOf(n.id);
+    const sig = JSON.stringify([n.anchors, rels.map((r) => [r.dir, r.type, r.partner.id, r.partner.title, r.label])]);
+    if (el.getAttribute("data-sig") === sig) return;
+    el.setAttribute("data-sig", sig);
+    const chips = row.querySelector(".zpo-anchors") as HTMLElement;
+    chips.textContent = "";
+    for (const a of n.anchors) {
+      const chip = h(doc, "span", { class: "zpo-chip", text: anchorLabel(a), title: a.quote ? `“${a.quote}”` : a.caption || `第 ${a.page} 页` });
+      chip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.select(n.id);
+        void this.jump(a, row);
+      });
+      chips.append(chip);
+    }
+    const box = row.querySelector(".zpo-rels") as HTMLElement;
+    box.textContent = "";
+    for (const r of rels) {
+      const chip = h(doc, "span", { class: `zpo-rel zpo-rel-${r.type}`, text: `${r.dir === "out" ? "→" : "←"} ${RELATION_LABELS[r.type]} · ${r.partner.title}`, title: r.label || "" });
+      chip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.reveal(r.partner.id);
+      });
+      box.append(chip);
+    }
   }
 
   private relationsOf(id: string) {
