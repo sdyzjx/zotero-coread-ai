@@ -180,3 +180,7 @@ export async function kvGet(key: string): Promise<string | null> {
 export async function kvSet(key: string, value: string): Promise<void> {
   await db.queryAsync(`INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)`, [key, value]);
 }
+
+export async function kvDelete(key: string): Promise<void> {
+  await db.queryAsync(`DELETE FROM kv WHERE key = ?`, [key]);
+}

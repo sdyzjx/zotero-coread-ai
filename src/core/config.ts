@@ -34,6 +34,12 @@ export interface Settings {
   annotationColor: string;
   annotationTag: string;
   autoConclusion: boolean;
+  /** Analyze the paper outline (文章脉络) automatically when a PDF is opened. */
+  autoOutline: boolean;
+  /** Model for outline analysis ("" = quick model). */
+  outlineModel: string;
+  /** Show the outline in the reader's left margin. */
+  outlineVisible: boolean;
   quickActions: QuickAction[];
 }
 
@@ -56,6 +62,9 @@ const DEFAULTS: Omit<Settings, "quickActions"> = {
   annotationColor: "#a28ae5",
   annotationTag: "AI",
   autoConclusion: true,
+  autoOutline: true,
+  outlineModel: "",
+  outlineVisible: true,
 };
 
 export function getPref<T = any>(key: string): T {
