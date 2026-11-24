@@ -42,10 +42,32 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)`,
 ];
 
+let shutdownListenerAdded = false;
+
 export async function openStore(): Promise<void> {
   if (db) return;
+  // If the last session didn't close cleanly (non-empty WAL), Zotero runs an integrity
+  // check while opening and shows "Checking database integrity…" over the Zotero pane, but
+  // never clears that overlay on success. Remove it if opening our database put it there.
+  const wasLocked = !!Zotero.locked;
   db = new Zotero.DBConnection("zoteropi");
-  for (const sql of SCHEMA) await db.queryAsync(sql);
+  try {
+    for (const sql of SCHEMA) await db.queryAsync(sql);
+  } finally {
+    if (!wasLocked && Zotero.locked) {
+      try {
+        Zotero.hideZoteroPaneOverlays();
+      } catch (e) {
+        Zotero.logError(e);
+      }
+    }
+  }
+  // bootstrap shutdown() skips teardown on app quit, so close the database from Zotero's own
+  // shutdown sequence: this checkpoints the WAL and avoids the integrity check next start.
+  if (!shutdownListenerAdded) {
+    shutdownListenerAdded = true;
+    Zotero.addShutdownListener(() => closeStore());
+  }
 }
 
 export async function closeStore(): Promise<void> {
