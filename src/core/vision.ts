@@ -3,7 +3,8 @@
  * Zotero uses for image annotations), and helpers for vision-capable models.
  */
 import type { ImageContent } from "@earendil-works/pi-ai";
-import { completeText, getModel, listModels } from "./llm";
+import { getSettings } from "./config";
+import { completeText, getModel, isCliModel, listModels } from "./llm";
 import { getPdfApp, getPageLabel, waive } from "./reader-utils";
 
 export interface RenderedRegion {
@@ -107,7 +108,12 @@ export function modelSupportsImages(model: any): boolean {
 
 /** A configured model that accepts image input (prefers the quick model). */
 export function visionModelId(preferred?: string): string | null {
-  const candidates = [preferred, "deepseek-flash", ...listModels().map((m) => m.id)].filter(Boolean) as string[];
+  const s = getSettings();
+  const hasKey = !!s.apiKey.trim();
+  // DeepSeek models need the API key; CLI agents (Claude Code, Codex) bring their own login
+  const candidates = [preferred, s.quickModel, s.model, "deepseek-flash", ...listModels().map((m) => m.id)].filter(
+    (id): id is string => !!id && (hasKey || isCliModel(id)),
+  );
   for (const id of candidates) {
     if (modelSupportsImages(getModel(id))) return id;
   }
@@ -117,7 +123,7 @@ export function visionModelId(preferred?: string): string | null {
 /** Ask a vision model about an image and return its text answer (for text-only sessions). */
 export async function describeImage(img: { data: string; mimeType: string }, question: string, signal?: AbortSignal): Promise<string> {
   const id = visionModelId();
-  if (!id) throw new Error("没有可用的视觉模型（需要 DeepSeek V4.1 Flash）");
+  if (!id) throw new Error("没有可用的视觉模型（需要 DeepSeek V4.1 Flash、Claude Code 或 Codex）");
   return completeText(
     {
       systemPrompt:

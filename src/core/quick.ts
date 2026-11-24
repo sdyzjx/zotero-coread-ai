@@ -5,7 +5,7 @@
  */
 import { getSettings, type QuickAction } from "./config";
 import { Emitter } from "./events";
-import { getModel, streamSimple } from "./llm";
+import { streamText } from "./llm";
 import { getItem, paperTitle, refFromItem, type PaperRef } from "./paper";
 import type { SessionManager } from "./sessions";
 import { resolveColor, saveSelectionAsHighlight } from "./annotate";
@@ -186,20 +186,17 @@ export class QuickService {
     this.abortCtrl = ctrl;
     const item = getItem(job.paper);
     try {
-      const model = getModel(s.quickModel);
-      const stream = streamSimple(
-        model,
+      await streamText(
         {
           systemPrompt: `You are a professional academic translator. Translate the user's text, an excerpt from the paper "${item ? paperTitle(item) : ""}", into ${s.targetLanguage}. If it is already in ${s.targetLanguage}, translate it into English instead. Fix PDF line-break hyphenation, keep math in LaTeX ($...$), keep citations like [12] unchanged, and for key technical terms add the original term in parentheses on first use. Output only the translation.`,
           messages: [{ role: "user", content: job.selection.text, timestamp: Date.now() }],
         },
-        { signal: ctrl.signal },
+        { model: s.quickModel, signal: ctrl.signal },
+        (ev) => {
+          if (this.job?.id === job.id && ev.type === "text") this.patch({ output: ev.text });
+        },
       );
-      for await (const ev of stream as any) {
-        if (this.job?.id !== job.id) return;
-        if (ev.type === "text_delta") this.patch({ output: this.job.output + ev.delta });
-        else if (ev.type === "error") throw new Error(ev.error?.errorMessage || "翻译失败");
-      }
+      if (ctrl.signal.aborted || this.job?.id !== job.id) return;
       if (this.job?.id === job.id) this.patch({ status: "done" });
     } catch (e: any) {
       if (this.job?.id === job.id && !ctrl.signal.aborted) this.patch({ status: "error", error: String(e?.message || e) });

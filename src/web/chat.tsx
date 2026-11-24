@@ -122,11 +122,32 @@ function fmtDate(t: number): string {
 function ModelPicker({ snap, runtime, models }: { snap: Snap; runtime: any; models: any[] }) {
   const model = models.find((m) => m.id === snap.modelId) || { thinkingLevels: ["off", "high"] };
   const labels: Record<string, string> = { off: "不思考", minimal: "极简", low: "低", medium: "中", high: "高", xhigh: "很高", max: "最大" };
+  const groups: [string, any[]][] = [];
+  for (const m of models) {
+    const g = groups.find(([name]) => name === (m.group || "模型"));
+    if (g) g[1].push(m);
+    else groups.push([m.group || "模型", [m]]);
+  }
   return (
     <div class="picker">
-      <select value={snap.modelId} onChange={(e) => runtime.setModel((e.target as HTMLSelectElement).value)} title="模型">
-        {models.map((m) => (
-          <option value={m.id}>{m.name}</option>
+      <select
+        value={snap.modelId}
+        onChange={(e) => {
+          try {
+            runtime.setModel((e.target as HTMLSelectElement).value);
+          } catch (err: any) {
+            (e.target as HTMLSelectElement).value = snap.modelId;
+            window.alert(String(err?.message || err));
+          }
+        }}
+        title="模型"
+      >
+        {groups.map(([group, list]) => (
+          <optgroup label={group}>
+            {list.map((m) => (
+              <option value={m.id}>{m.name}</option>
+            ))}
+          </optgroup>
         ))}
         {!models.some((m) => m.id === snap.modelId) && <option value={snap.modelId}>{snap.modelId}</option>}
       </select>
@@ -316,9 +337,9 @@ function PanelApp() {
           {conclusion ? <Markdown text={conclusion} /> : <div class="muted">对话后会自动生成结论。</div>}
         </div>
       )}
-      {!settings.apiKey && (
+      {!settings.apiKey && (models.find((m) => m.id === (snap?.modelId || settings.model))?.source || "deepseek") === "deepseek" && (
         <div class="banner">
-          尚未配置 DeepSeek API Key。
+          尚未配置 DeepSeek API Key（也可以在设置中改用 Claude Code / Codex / Antigravity）。
           <button class="link-btn" onClick={() => api.openSettings()}>
             打开设置
           </button>

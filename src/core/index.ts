@@ -3,7 +3,11 @@ import { disposePolyfills, installPolyfills } from "./polyfill";
 import { getSettings, saveSettings, type QuickAction, type Settings } from "./config";
 import { ContextTracker } from "./context";
 import { globalEvents } from "./events";
-import { listModels, testConnection } from "./llm";
+import { listModels, testConnection, testModel } from "./llm";
+import { agyPluginStatus, installAgyPlugin, uninstallAgyPlugin } from "./agents/agy";
+import { detectCli, disposeCliProcesses } from "./agents/runner";
+import type { CliProviderId } from "./agents/providers";
+import * as workspaces from "./agents/workspace";
 import { getItem, getMainAttachment, type PaperRef } from "./paper";
 import { IMAGE_ACTIONS, QuickService, type Selection } from "./quick";
 import { ensureReader, navigateToPage, selectReaderTab } from "./reader-utils";
@@ -15,6 +19,7 @@ import { OutlineGutter } from "./ui/outline-gutter";
 import { QuickCard } from "./ui/quickcard";
 import { injectToolbarIntoOpenReaders, registerReaderHooks, removeToolbarFromReaders } from "./ui/reader-hooks";
 import { registerDevEndpoint, unregisterDevEndpoint } from "./dev";
+import { registerMcpEndpoint, unregisterMcpEndpoint } from "./mcp/bridge";
 import { selectRegion } from "./ui/region-select";
 import { renderRegion, type RenderedRegion } from "./vision";
 import { findReader } from "./reader-utils";
@@ -48,6 +53,7 @@ class ZoteroPiAddon {
   async startup(): Promise<void> {
     await openStore();
     if (__DEV__) registerDevEndpoint(this);
+    registerMcpEndpoint();
     registerReaderHooks(this);
     injectToolbarIntoOpenReaders(this);
     // Readers restored from the previous session may still be loading.
@@ -145,9 +151,11 @@ class ZoteroPiAddon {
     this.context.stop();
     if (this.win) this.onMainWindowUnload(this.win);
     this.sessions.dispose();
+    disposeCliProcesses();
     globalEvents.clear();
     for (const w of Services.wm.getEnumerator("zoteropi:settings")) w.close();
     if (__DEV__) unregisterDevEndpoint();
+    unregisterMcpEndpoint();
     disposePolyfills();
     await closeStore();
   }
@@ -164,13 +172,33 @@ class ZoteroPiAddon {
     globalEvents.emit({ type: "settings-changed" });
   }
 
-  listModels() {
-    return listModels();
+  /** Models of all configured sources; `override` previews unsaved settings. */
+  listModels(override?: Partial<Settings>) {
+    return listModels(override ? JSON.parse(JSON.stringify(override)) : undefined);
   }
 
   testConnection() {
     return testConnection();
   }
+
+  testModel(id: string) {
+    return testModel(String(id));
+  }
+
+  /** CLI agents and their workspaces (settings page). */
+  readonly cli = {
+    detect: (provider: CliProviderId) => detectCli(provider),
+    agyStatus: () => agyPluginStatus(),
+    installAgy: () => installAgyPlugin(this.version),
+    uninstallAgy: () => uninstallAgyPlugin(),
+    workspaceRoot: () => workspaces.workspaceRoot(),
+    defaultWorkspaceRoot: () => workspaces.defaultWorkspaceRoot(),
+    listWorkspaces: () => workspaces.listWorkspaces(),
+    reveal: (dir?: string) => workspaces.revealWorkspace(dir || workspaces.workspaceRoot()),
+    removeWorkspace: (dir: string) => workspaces.removeWorkspace(String(dir)),
+    cleanOrphans: () => workspaces.cleanOrphanWorkspaces(),
+    pruneAttachments: (days = 30) => workspaces.pruneAttachments(days),
+  };
 
   imageActions() {
     return IMAGE_ACTIONS;
