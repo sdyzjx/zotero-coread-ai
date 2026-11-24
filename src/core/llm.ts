@@ -2,6 +2,8 @@ import { createModels, type Model, type Api, type Context, type AssistantMessage
 import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { getSettings } from "./config";
+import { cliComplete } from "./agents/runner";
+import { CLI_PROVIDERS, cliModelEntries, parseCliModelId } from "./agents/providers";
 
 const models = createModels();
 models.setProvider(deepseekProvider());
@@ -12,24 +14,68 @@ export interface ModelInfo {
   reasoning: boolean;
   thinkingLevels: string[];
   builtin: boolean;
+  /** "deepseek" (pi, API key) or a CLI provider id. */
+  source: string;
+  /** Display group, e.g. "DeepSeek API", "Claude Code". */
+  group: string;
+  images: boolean;
 }
 
-/** DeepSeek models known to pi plus user-configured extra model ids. */
+export const API_SOURCE = "deepseek";
+
+/** DeepSeek models known to pi, user-configured extra model ids, then the enabled CLI agents. */
 export function listModels(): ModelInfo[] {
   const builtin = models.getModels("deepseek");
+  const api = { source: API_SOURCE, group: "DeepSeek API" };
   const out: ModelInfo[] = builtin.map((m) => ({
     id: m.id,
     name: m.name,
     reasoning: !!m.reasoning,
     thinkingLevels: thinkingLevelsOf(m),
     builtin: true,
+    images: (m.input || []).includes("image"),
+    ...api,
   }));
   for (const id of extraModelIds()) {
     if (!out.some((m) => m.id === id)) {
-      out.push({ id, name: id, reasoning: true, thinkingLevels: ["off", "low", "high", "max"], builtin: false });
+      out.push({ id, name: id, reasoning: true, thinkingLevels: ["off", "low", "high", "max"], builtin: false, images: false, ...api });
     }
   }
+  const s = getSettings();
+  const cli = cliModelEntries(
+    { "claude-code": s.cliClaudeEnabled, codex: s.cliCodexEnabled, agy: s.cliAgyEnabled },
+    { "claude-code": s.cliClaudeModels, codex: s.cliCodexModels, agy: s.cliAgyModels },
+  );
+  for (const e of cli) {
+    const m = cliModel(e.id);
+    out.push({ id: e.id, name: e.name, reasoning: true, thinkingLevels: thinkingLevelsOf(m), builtin: true, images: CLI_PROVIDERS[e.provider].supportsImages, source: e.provider, group: CLI_PROVIDERS[e.provider].label });
+  }
   return out;
+}
+
+export function isCliModel(id?: string | null): boolean {
+  return !!parseCliModelId(id);
+}
+
+/** A pi Model stand-in for a CLI agent (the CLI picks the real model). */
+function cliModel(id: string): Model<Api> {
+  const { provider, model } = parseCliModelId(id)!;
+  const def = CLI_PROVIDERS[provider];
+  const thinkingLevelMap: Record<string, string | null> = {};
+  for (const l of ["minimal", "low", "medium", "high", "xhigh", "max"]) thinkingLevelMap[l] = def.thinkingLevels.includes(l) ? l : null;
+  return {
+    id,
+    name: model ? `${def.label} · ${model}` : `${def.label}（默认模型）`,
+    api: "cli" as any,
+    provider: provider as any,
+    baseUrl: "",
+    reasoning: true,
+    thinkingLevelMap,
+    input: def.supportsImages ? ["text", "image"] : ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 200000,
+    maxTokens: 32000,
+  } as any;
 }
 
 function extraModelIds(): string[] {
@@ -53,6 +99,7 @@ function thinkingLevelsOf(m: Model<Api>): string[] {
 export function getModel(id?: string): Model<Api> {
   const settings = getSettings();
   const wanted = id || settings.model;
+  if (isCliModel(wanted)) return cliModel(wanted);
   let model = models.getModel("deepseek", wanted);
   if (!model) {
     // Unknown DeepSeek id (e.g. a newer model): reuse the flash definition.
@@ -99,6 +146,7 @@ export async function completeText(
 ): Promise<string> {
   const model = getModel(opts.model || getSettings().quickModel);
   const reasoning = opts.reasoning && opts.reasoning !== "off" ? clampThinking(model, opts.reasoning) : undefined;
+  if (isCliModel(model.id)) return cliComplete(model.id, { ...contextToPrompt(context), reasoning, signal: opts.signal });
   const msg: AssistantMessage = await models.completeSimple(model, context, {
     apiKey: requireApiKey(),
     reasoning: reasoning as any,
@@ -136,6 +184,7 @@ export async function streamText(
   onEvent: (e: { type: "thinking" | "text"; text: string; thinking: string }) => void,
 ): Promise<string> {
   const model = getModel(opts.model || getSettings().quickModel);
+  if (isCliModel(model.id)) return cliComplete(model.id, { ...contextToPrompt(context), reasoning: opts.reasoning, signal: opts.signal }, onEvent);
   const stream = models.streamSimple(model, context, {
     apiKey: requireApiKey(),
     reasoning: opts.reasoning as any,
@@ -157,6 +206,25 @@ export async function streamText(
   }
   if (opts.signal?.aborted) throw new Error("aborted");
   return text;
+}
+
+/** Flatten a pi context into one prompt (+ images) for a one-shot CLI call. */
+function contextToPrompt(context: Context): { systemPrompt?: string; prompt: string; images: { data: string; mimeType: string }[] } {
+  const images: { data: string; mimeType: string }[] = [];
+  const parts: string[] = [];
+  const multi = context.messages.length > 1;
+  for (const m of context.messages as any[]) {
+    let text = "";
+    if (typeof m.content === "string") text = m.content;
+    else
+      for (const c of m.content || []) {
+        if (c.type === "text") text += (text ? "\n" : "") + c.text;
+        else if (c.type === "image") images.push({ data: c.data, mimeType: c.mimeType });
+      }
+    if (!text) continue;
+    parts.push(multi ? `${m.role === "assistant" ? "Assistant" : "User"}: ${text}` : text);
+  }
+  return { systemPrompt: context.systemPrompt, prompt: parts.join("\n\n"), images };
 }
 
 /** Check credentials and list models available on the account. */
