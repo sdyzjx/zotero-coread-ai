@@ -27,7 +27,7 @@ import { buildCharIndex, findQuote, getRangeRects } from "./text";
 export type OutlineState =
   | { status: "idle" }
   /** `partial`: the outline streamed so far (the tree grows as it arrives); `rev` bumps on each update. */
-  | { status: "loading"; stage: string; started: number; partial?: PaperOutline; rev?: number }
+  | { status: "loading"; stage: string; started: number; partial?: PaperOutline; rev?: number; thinking?: string }
   | { status: "ready"; outline: PaperOutline }
   | { status: "error"; message: string };
 
@@ -154,7 +154,9 @@ export class OutlineService {
       let rev = 0;
       let lastEmit = 0;
       let lastSize = 0;
+      let lastThink = 0;
       let writing = false;
+      let thinking = "";
       const reply = await streamText(
         { messages: [{ role: "user", content: prompt, timestamp: Date.now() }] },
         {
@@ -165,21 +167,31 @@ export class OutlineService {
           maxTokens: 16000,
         },
         (e) => {
-          if (signal.aborted || e.type !== "text") return;
+          if (signal.aborted) return;
+          if (e.type === "thinking") {
+            // Show the reasoning while waiting (throttled; only the tail is kept)
+            const now = Date.now();
+            if (now - lastThink < 200) return;
+            lastThink = now;
+            thinking = e.thinking.slice(-3000);
+            this.set(ref, { status: "loading", stage: "思考中…", started, thinking, rev });
+            return;
+          }
           if (!writing) {
             writing = true;
-            stage("生成中…");
+            thinking = e.thinking.slice(-3000);
+            this.set(ref, { status: "loading", stage: "生成中…", started, thinking, rev });
           }
           // Re-parse the growing JSON a few times per second and publish the partial tree
           const now = Date.now();
           if (now - lastEmit < 160 || e.text.length === lastSize) return;
           lastEmit = now;
           lastSize = e.text.length;
-          const raw = parsePartialJson(e.text);
+          const raw = parsePartialJson(e.text, { completeStringsOnly: true });
           if (!raw) return;
           try {
             const partial = normalizeOutline(raw, totalPages, modelId, true);
-            if (partial.sections.length) this.set(ref, { status: "loading", stage: "生成中…", started, partial, rev: ++rev });
+            if (partial.sections.length) this.set(ref, { status: "loading", stage: "生成中…", started, partial, rev: ++rev, thinking });
           } catch {
             // wait for more text
           }

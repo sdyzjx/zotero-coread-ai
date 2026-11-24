@@ -6,7 +6,7 @@
  * scrolls the PDF to the paragraph / figure and draws a translucent guide
  * (connector + soft box) that fades out by itself.
  */
-import { getSettings, saveSettings, type QuickAction } from "../config";
+import { getPref, getSettings, saveSettings, setPref, type QuickAction } from "../config";
 import { saveRegionHighlight } from "../annotate";
 import type { Selection } from "../quick";
 import { getPageLabel } from "../reader-utils";
@@ -126,6 +126,11 @@ export class OutlineGutter {
   private seen = new Map<string, Set<string>>();
   private tree: HTMLElement | null = null;
   private treeKey = "";
+  private headEl: HTMLElement | null = null;
+  private headSig = "";
+  private progress: { key: string; el: HTMLElement; stage: HTMLElement; skeleton: HTMLElement } | null = null;
+  private think: { el: HTMLElement; body: HTMLElement } | null = null;
+  private oneEl: HTMLElement | null = null;
   private activeId: string | null = null;
   private timer: any = null;
   private guide: Guide | null = null;
@@ -421,7 +426,7 @@ export class OutlineGutter {
       state.status === "ready"
         ? state.outline.created
         : state.status === "loading"
-          ? `${state.stage}|${state.rev || 0}`
+          ? `${state.stage}|${state.rev || 0}|${state.thinking?.length || 0}`
           : state.status === "error"
             ? state.message
             : "";
@@ -434,74 +439,141 @@ export class OutlineGutter {
     this.loadingSince = streaming ? state.started : 0;
     this.pill.setAttribute("data-state", state.status);
     this.pill.title = streaming ? "正在生成文章脉络…（点击展开）" : "展开文章脉络";
+    const o = this.outline;
+    const hasNodes = !!o?.sections.length;
 
-    // Header
-    const head = h(doc, "div", { class: "zpo-head" }, [
-      h(doc, "span", { class: "zpo-logo", text: "π" }),
-      h(doc, "span", { class: "zpo-heading", text: "文章脉络" }),
-    ]);
-    if (this.outline) head.append(h(doc, "span", { class: "zpo-kind", text: this.outline.kind === "survey" ? "综述" : "研究" }));
-    head.append(h(doc, "span", { class: "zpo-spacer" }));
-    if (state.status === "ready") head.append(this.btn("⊟", "全部折叠 / 展开", () => this.toggleAll()));
-    if (state.status === "ready" || state.status === "error") {
-      head.append(this.btn("↻", "重新分析文章脉络", () => this.ctx && this.service.generate(this.ctx.ref, true)));
+    // Header: rebuilt only when its buttons / badge change
+    const headSig = `${pk}|${state.status}|${o?.kind || ""}`;
+    if (this.headSig !== headSig || !this.headEl) {
+      this.headSig = headSig;
+      const head = h(doc, "div", { class: "zpo-head" }, [
+        h(doc, "span", { class: "zpo-logo", text: "π" }),
+        h(doc, "span", { class: "zpo-heading", text: "文章脉络" }),
+      ]);
+      if (o) head.append(h(doc, "span", { class: "zpo-kind", text: o.kind === "survey" ? "综述" : "研究" }));
+      head.append(h(doc, "span", { class: "zpo-spacer" }));
+      if (state.status === "ready") head.append(this.btn("⊟", "全部折叠 / 展开", () => this.toggleAll()));
+      if (state.status === "ready" || state.status === "error") {
+        head.append(this.btn("↻", "重新分析文章脉络", () => this.ctx && this.service.generate(this.ctx.ref, true)));
+      }
+      head.append(this.btn("‹", "收起（点击左边缘的「π 脉络」标签或阅读器工具栏 π≡ 重新展开）", () => this.setExpanded(false)));
+      this.headEl = head;
     }
-    head.append(this.btn("‹", "收起（点击左边缘的「π 脉络」标签或阅读器工具栏 π≡ 重新展开）", () => this.setExpanded(false)));
 
-    // Status line
+    // Status line: one persistent element while generating, text updated in place
     let status: HTMLElement | null = null;
     if (streaming) {
-      const cancel = h(doc, "button", { class: "zpo-link", text: "取消" });
-      cancel.addEventListener("click", () => this.ctx && this.service.cancel(this.ctx.ref));
-      status = h(doc, "div", { class: "zpo-status" + (this.outline ? " zpo-status-compact" : "") }, [
-        h(doc, "div", { class: "zpo-progress" }, [
-          h(doc, "div", { class: "zpo-spinner" }),
-          h(doc, "span", { text: state.stage || "正在分析…" }),
-          h(doc, "span", { class: "zpo-elapsed", text: `${Math.round((Date.now() - state.started) / 1000)}s` }),
-          h(doc, "span", { class: "zpo-spacer" }),
-          cancel,
-        ]),
-      ]);
-      if (!this.outline) status.append(h(doc, "div", { class: "zpo-skeleton" }, [1, 2, 3, 4, 5].map(() => h(doc, "div", { class: "zpo-skel-line" }))));
-    } else if (state.status === "error") {
-      status = h(doc, "div", { class: "zpo-status zpo-error" }, [h(doc, "div", { text: state.message })]);
-    } else if (state.status === "idle") {
-      const go = h(doc, "button", { class: "zpo-go", text: "生成文章脉络" });
-      go.addEventListener("click", () => this.ctx && this.service.generate(this.ctx.ref));
-      status = h(doc, "div", { class: "zpo-status" }, [
-        h(doc, "div", { text: "梳理摘要 → 背景 → 问题 → 相关工作 → Gap → 方法 → 实验 → 结果 → 结论，点击即可跳转到原文。" }),
-        go,
-      ]);
+      if (!this.progress || this.progress.key !== pk) {
+        const cancel = h(doc, "button", { class: "zpo-link", text: "取消" });
+        cancel.addEventListener("click", () => this.ctx && this.service.cancel(this.ctx.ref));
+        const stage = h(doc, "span");
+        const skeleton = h(doc, "div", { class: "zpo-skeleton" }, [1, 2, 3, 4, 5].map(() => h(doc, "div", { class: "zpo-skel-line" })));
+        const el = h(doc, "div", { class: "zpo-status" }, [
+          h(doc, "div", { class: "zpo-progress" }, [
+            h(doc, "div", { class: "zpo-spinner" }),
+            stage,
+            h(doc, "span", { class: "zpo-elapsed", text: "0s" }),
+            h(doc, "span", { class: "zpo-spacer" }),
+            cancel,
+          ]),
+          skeleton,
+        ]);
+        this.progress = { key: pk, el, stage, skeleton };
+      }
+      const p = this.progress;
+      if (p.stage.textContent !== state.stage) p.stage.textContent = state.stage || "正在分析…";
+      p.el.classList.toggle("zpo-status-compact", hasNodes);
+      // Placeholder lines only until there is something to show (thinking or nodes)
+      p.skeleton.hidden = hasNodes || !!state.thinking;
+      status = p.el;
+    } else {
+      this.progress = null;
+      if (state.status === "error") {
+        status = h(doc, "div", { class: "zpo-status zpo-error" }, [h(doc, "div", { text: state.message })]);
+      } else if (state.status === "idle") {
+        const go = h(doc, "button", { class: "zpo-go", text: "生成文章脉络" });
+        go.addEventListener("click", () => this.ctx && this.service.generate(this.ctx.ref));
+        status = h(doc, "div", { class: "zpo-status" }, [
+          h(doc, "div", { text: "梳理摘要 → 背景 → 问题 → 相关工作 → Gap → 方法 → 实验 → 结果 → 结论，点击即可跳转到原文。" }),
+          go,
+        ]);
+      }
     }
 
+    // Thinking window: while waiting for the first node only
+    let think: HTMLElement | null = null;
+    if (streaming && !hasNodes && state.thinking) {
+      think = this.thinkBox(state.thinking);
+    } else {
+      this.think = null;
+    }
+
+    // One-line summary
+    if (o?.oneLine) {
+      if (!this.oneEl) this.oneEl = h(doc, "div", { class: "zpo-one" });
+      if (this.oneEl.textContent !== o.oneLine) this.oneEl.textContent = o.oneLine;
+    } else this.oneEl = null;
+
     // Tree: kept across updates so streamed nodes grow in place
-    const o = this.outline;
-    if (o) {
-      if (this.treeKey !== pk || !this.body.isConnected || !this.tree) {
+    if (hasNodes) {
+      if (this.treeKey !== pk || !this.tree) {
         this.rows.clear();
         this.body = h(doc, "div", { class: "zpo-body" });
         this.tree = h(doc, "div", { class: "zpo-tree" });
         this.body.append(this.tree);
         this.treeKey = pk;
       }
-      this.reconcile(o, streaming);
+      this.reconcile(o!, streaming);
+      this.body.classList.toggle("zpo-streaming", streaming);
     } else {
       this.rows.clear();
       this.tree = null;
       this.treeKey = "";
     }
 
-    // Assemble (re-appending the same body keeps its nodes and scroll position)
-    const parts: HTMLElement[] = [head];
-    if (status) parts.push(status);
-    if (o?.oneLine) parts.push(h(doc, "div", { class: "zpo-one", text: o.oneLine }));
-    if (o) parts.push(this.body);
-    const scroll = this.body.scrollTop;
-    this.gutter.replaceChildren(...parts);
-    this.body.scrollTop = scroll;
-    this.body.classList.toggle("zpo-streaming", streaming);
+    const parts = [this.headEl, status, think, this.oneEl, hasNodes ? this.body : null].filter(Boolean) as HTMLElement[];
+    this.setParts(parts);
     this.applyActive();
-    this.win.requestAnimationFrame(() => this.drawArcs());
+    if (o?.relations.length) this.win.requestAnimationFrame(() => this.drawArcs());
+  }
+
+  /** Put `parts` in order without detaching elements that are already in place (no restarts). */
+  private setParts(parts: HTMLElement[]): void {
+    const g = this.gutter;
+    parts.forEach((p, i) => {
+      if (g.children[i] !== p) g.insertBefore(p, g.children[i] || null);
+    });
+    while (g.children.length > parts.length) g.lastElementChild!.remove();
+  }
+
+  /** Fixed-height, collapsible window streaming the model's reasoning. */
+  private thinkBox(text: string): HTMLElement {
+    const doc = this.doc;
+    if (!this.think) {
+      const body = h(doc, "div", { class: "zpo-think-body" });
+      const chevron = h(doc, "span", { class: "zpo-think-chevron", text: "›" });
+      const headRow = h(doc, "div", { class: "zpo-think-head", title: "展开 / 收起思考过程" }, [
+        h(doc, "span", { class: "zpo-think-dot" }),
+        h(doc, "span", { text: "思考过程" }),
+        h(doc, "span", { class: "zpo-spacer" }),
+        chevron,
+      ]);
+      const el = h(doc, "div", { class: "zpo-think" }, [headRow, body]);
+      el.classList.toggle("zpo-think-collapsed", !!getPref<boolean>("outlineThinkCollapsed"));
+      headRow.addEventListener("click", () => {
+        const collapsed = !el.classList.contains("zpo-think-collapsed");
+        el.classList.toggle("zpo-think-collapsed", collapsed);
+        setPref("outlineThinkCollapsed", collapsed);
+        if (!collapsed) body.scrollTop = body.scrollHeight;
+      });
+      this.think = { el, body };
+    }
+    const { el, body } = this.think;
+    // Follow the newest text unless the user scrolled up to read
+    const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 8;
+    if (body.textContent !== text) body.textContent = text;
+    if (atBottom) body.scrollTop = body.scrollHeight;
+    return el;
   }
 
   private expandedSet(): Set<string> {

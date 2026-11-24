@@ -133,7 +133,7 @@ export function pickThinking(model: Model<Api>, level: string): string | undefin
 export async function streamText(
   context: Context,
   opts: { model?: string; reasoning?: string; signal?: AbortSignal; maxTokens?: number },
-  onEvent: (e: { type: "thinking" | "text"; text: string }) => void,
+  onEvent: (e: { type: "thinking" | "text"; text: string; thinking: string }) => void,
 ): Promise<string> {
   const model = getModel(opts.model || getSettings().quickModel);
   const stream = models.streamSimple(model, context, {
@@ -143,12 +143,14 @@ export async function streamText(
     maxTokens: opts.maxTokens,
   });
   let text = "";
+  let thinking = "";
   for await (const ev of stream as any) {
     if (ev.type === "text_delta") {
       text += ev.delta;
-      onEvent({ type: "text", text });
+      onEvent({ type: "text", text, thinking });
     } else if (ev.type === "thinking_delta") {
-      onEvent({ type: "thinking", text });
+      thinking += ev.delta;
+      onEvent({ type: "thinking", text, thinking });
     } else if (ev.type === "error") {
       throw new Error(ev.error?.errorMessage || "请求失败");
     }

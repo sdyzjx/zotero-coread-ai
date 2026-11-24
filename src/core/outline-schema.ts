@@ -235,10 +235,11 @@ export function extractJson(text: string): any {
 }
 
 /** Scan JSON text: whether it ends inside a string and the stack of open containers. */
-function scanJson(s: string): { inString: boolean; escape: boolean; stack: string[] } {
+function scanJson(s: string): { inString: boolean; escape: boolean; stack: string[]; strStart: number } {
   const stack: string[] = [];
   let inString = false;
   let escape = false;
+  let strStart = -1;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (inString) {
@@ -247,18 +248,20 @@ function scanJson(s: string): { inString: boolean; escape: boolean; stack: strin
       else if (c === '"') inString = false;
       continue;
     }
-    if (c === '"') inString = true;
-    else if (c === "{" || c === "[") stack.push(c);
+    if (c === '"') {
+      inString = true;
+      strStart = i;
+    } else if (c === "{" || c === "[") stack.push(c);
     else if (c === "}" || c === "]") stack.pop();
   }
-  return { inString, escape, stack };
+  return { inString, escape, stack, strStart };
 }
 
 /**
  * Parse the prefix of a streamed JSON object: close an open string, drop a dangling key /
  * comma, and close open containers. Returns null when the prefix isn't parseable yet.
  */
-export function parsePartialJson(text: string): any | null {
+export function parsePartialJson(text: string, opts: { completeStringsOnly?: boolean } = {}): any | null {
   let s = String(text || "");
   const fence = s.indexOf("```");
   if (fence !== -1 && s.indexOf("{") > fence) s = s.slice(s.indexOf("{"));
@@ -267,8 +270,13 @@ export function parsePartialJson(text: string): any | null {
   s = s.slice(start).replace(/```\s*$/, "");
   const first = scanJson(s);
   if (first.inString) {
-    if (first.escape) s = s.slice(0, -1);
-    s += '"';
+    if (opts.completeStringsOnly) {
+      // Drop the unfinished string so text only ever appears whole (no typewriter jitter)
+      s = s.slice(0, first.strStart);
+    } else {
+      if (first.escape) s = s.slice(0, -1);
+      s += '"';
+    }
   }
   // Trailing junk: dangling `"key":`, `"key"` right after { or , (an unfinished key), or a comma
   for (let k = 0; k < 4; k++) {

@@ -226,3 +226,10 @@ test("parsePartialJson parses streamed prefixes", async () => {
   assert.deepEqual(o.sections.map((s) => s.key), ["gap", "method"], "a section shows as soon as its key arrives");
   assert.equal(normalizeOutline({ kind: "research", sections: [] }, 1, "", true).sections.length, 0);
 });
+
+test("parsePartialJson can hide unfinished strings", async () => {
+  const { parsePartialJson } = await import("../src/core/outline-schema.ts");
+  assert.deepEqual(parsePartialJson('{"a": "done", "b": "half wri', { completeStringsOnly: true }), { a: "done" });
+  assert.deepEqual(parsePartialJson('{"sections": [{"key": "gap", "summary": "no', { completeStringsOnly: true }), { sections: [{ key: "gap" }] });
+  assert.deepEqual(parsePartialJson('{"sections": [{"ke', { completeStringsOnly: true }), { sections: [{}] });
+});
