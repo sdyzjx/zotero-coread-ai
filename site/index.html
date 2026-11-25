@@ -195,6 +195,13 @@ h2 { font: 600 clamp(26px, 3.2vw, 36px)/1.25 var(--serif); margin: 10px 0 16px; 
 .steps p { margin: 0 0 6px; color: var(--ink-2); }
 .dl { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; padding: 14px 16px; margin-top: 8px; border: 1px dashed var(--rule); border-radius: 12px; background: var(--sheet); font-size: 13.5px; color: var(--muted); }
 .dl .hash { font: 12px var(--mono); word-break: break-all; user-select: all; }
+.steps h3[id] { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 84px); }
+.shot { margin: 10px 0 12px; border: 1px solid var(--rule); border-radius: 12px; overflow: hidden; background: var(--sheet); box-shadow: var(--shadow); max-width: 640px; }
+.shot img { display: block; width: 100%; height: auto; }
+.shot figcaption { padding: 8px 14px; border-top: 1px solid var(--rule); font-size: 13px; color: var(--muted); }
+.kv { margin: 0 0 6px; padding-left: 1.3em; color: var(--ink-2); }
+.kv li { margin: 2px 0; }
+.note-key { margin-top: 8px; padding: 10px 14px; border-left: 3px solid var(--hl); border-radius: 0 10px 10px 0; background: var(--hl-soft); color: var(--ink); font-size: 14px; }
 
 .faq { margin-top: 18px; display: grid; gap: 10px; }
 details { background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 18px; }
@@ -479,6 +486,7 @@ footer .brand img { width: 24px; height: 24px; }
               <span>coread-ai-{{VERSION}}.xpi · {{SIZE}}</span>
               <span>SHA-256 <span class="hash">{{SHA256}}</span></span>
             </div>
+            <p style="margin-top:8px">也可以从 <a href="https://github.com/sdyzjx/zotero-coread-ai/releases/latest">GitHub Releases</a> 下载同一个文件。</p>
           </div>
         </li>
         <li>
@@ -489,9 +497,19 @@ footer .brand img { width: 24px; height: 24px; }
         </li>
         <li>
           <div>
-            <h3>选择模型来源</h3>
-            <p>打开 <b>Zotero 设置 → CoRead AI</b>（或 <b>工具 → CoRead AI 设置…</b>）：</p>
-            <p>· DeepSeek：在「模型来源」填入 API Key，点「测试连接」。<br />· Claude Code / Codex / Antigravity：先在终端装好并登录对应 CLI，然后在对应标签页点「检测」和「设为默认来源」。Antigravity 还需点一次「安装插件」。</p>
+            <h3 id="key">填入你自己的 API Key</h3>
+            <p>安装包不带任何 Key。打开 <b>Zotero 设置 → CoRead AI</b>（或 <b>工具 → CoRead AI 设置…</b>）：</p>
+            <figure class="shot">
+              <img src="/settings-key.webp" width="1200" height="743" loading="lazy" alt="CoRead AI 设置页：模型来源中的 DeepSeek API 标签、API Key 输入框和测试连接按钮" />
+              <figcaption>① 选 DeepSeek API　② 粘贴 Key　③ 测试连接，然后点底部「保存」</figcaption>
+            </figure>
+            <ol class="kv">
+              <li>在 <a href="https://platform.deepseek.com/api_keys">platform.deepseek.com</a> 创建一个 Key（<code>sk-</code> 开头）。</li>
+              <li>在「模型来源」选 <b>DeepSeek API</b>，把 Key 粘贴到 <b>API Key</b> 输入框。</li>
+              <li>点 <b>测试连接</b>，成功后点页面底部的 <b>保存</b>。</li>
+            </ol>
+            <p class="note-key"><b>换 Key</b>：在 DeepSeek 平台删掉旧 Key、新建一个，回到同一个输入框清空后粘贴新 Key，再测试、保存。不需要重装插件。</p>
+            <p style="margin-top:10px"><b>不用 Key 也行</b>：在 Claude Code / Codex / Antigravity 标签页点「检测」和「设为默认来源」，插件会调用你本机已登录的 CLI（需先在终端装好并登录）。Antigravity 还需点一次「安装插件」。</p>
           </div>
         </li>
         <li>
@@ -506,6 +524,10 @@ footer .brand img { width: 24px; height: 24px; }
         <details>
           <summary>我的数据会发到哪里？</summary>
           <p>论文内容只发给你选择的模型来源：DeepSeek API，或你本机登录的 Claude Code / Codex / Antigravity。API Key 保存在 Zotero 本地偏好设置中；插件提供给 CLI 的工具服务只监听 127.0.0.1，每轮对话使用一次性地址。</p>
+        </details>
+        <details>
+          <summary>Key 过期或泄露了怎么办？</summary>
+          <p>先在 DeepSeek 平台删除旧 Key，旧 Key 立即失效。再新建一个，粘贴到 <b>设置 → 模型来源 → DeepSeek API → API Key</b>，测试连接并保存。插件不会把 Key 上传到本站或任何第三方，它只保存在你电脑上的 Zotero 偏好设置里。</p>
         </details>
         <details>
           <summary>要花多少钱？</summary>

@@ -8,8 +8,9 @@
 Zotero 7–10 插件 · 文章脉络引导注意力 · 在 PDF 里就地提问 · 读懂的内容沉淀为批注</p>
 
 <p align="center">
-  <a href="https://coread.doosam.uk">官网与下载</a> ·
-  <a href="https://coread.doosam.uk/#install">安装说明</a> ·
+  <a href="https://github.com/sdyzjx/zotero-coread-ai/releases/latest">下载最新版 .xpi</a> ·
+  <a href="https://coread.doosam.uk">官网</a> ·
+  <a href="#配置-api-key">配置 API Key</a> ·
   <a href="#模型来源">DeepSeek / Claude Code / Codex / Antigravity</a>
 </p>
 
@@ -34,12 +35,29 @@ CoRead AI 不替你读论文，而是陪你读：
 
 ## 快速开始
 
-1. 从 [coread.doosam.uk](https://coread.doosam.uk) 下载 `.xpi`（或自行 `npm install && npm run build`）。
-2. Zotero → 工具 → 插件 → 齿轮 →「从文件安装插件…」，选择该文件。插件之后会自动从官网检查更新。
-3. Zotero 设置 → **CoRead AI**（或 工具 → CoRead AI 设置…）→「模型来源」：填入 DeepSeek API Key，或检测本机已登录的 Claude Code / Codex / Antigravity CLI 并「设为默认来源」。
-4. 打开一篇 PDF：左侧点「生成文章脉络」，选中文字用 AI 按钮，`⌘/Ctrl + Shift + L` 打开聊天面板，`⌘/Ctrl + Shift + K` 框图提问。
+1. **下载**：到 [Releases](https://github.com/sdyzjx/zotero-coread-ai/releases/latest) 下载 `coread-ai-<版本>.xpi`，或在 [coread.doosam.uk](https://coread.doosam.uk/#install) 点「下载插件」。如果浏览器把 `.xpi` 当成扩展打开，改用右键「链接另存为」。
+2. **安装**：Zotero → 工具 → 插件 → 右上角齿轮 →「从文件安装插件…」，选择下载的文件。之后插件会自动从官网检查更新。
+3. **配置模型**：按下面「[配置 API Key](#配置-api-key)」填入你自己的 DeepSeek Key；或者改用本机已登录的 Claude Code / Codex / Antigravity，不需要 Key。
+4. **开始读**：打开一篇 PDF，左侧点「生成文章脉络」；选中文字用 AI 按钮；`⌘/Ctrl + Shift + L` 打开聊天面板，`⌘/Ctrl + Shift + K` 框图提问。
 
 > 原名 Zotero Pi Agent。直接安装新版即可覆盖，设置、会话与脉络缓存都会保留。
+
+## 配置 API Key
+
+发布的安装包**不带任何 API Key**，装好后需要填你自己的。
+
+<p align="center"><img src="assets/settings-key.png" width="720" alt="CoRead AI 设置：模型来源 → DeepSeek API → 填入 API Key → 测试连接" /></p>
+
+1. 打开设置：**Zotero 设置 → CoRead AI**，或菜单 **工具 → CoRead AI 设置…**。
+2. 在「模型来源」选 **DeepSeek API** 标签页（图中 ①）。
+3. 在 [platform.deepseek.com](https://platform.deepseek.com/api_keys) 创建一个 Key（`sk-` 开头），粘贴到 **API Key** 输入框（②）。
+4. 点 **测试连接**（③），提示成功后点页面底部的 **保存**。
+
+**更换 Key**：Key 过期、额度用完或怀疑泄露时，先在 DeepSeek 平台删除旧 Key 并新建一个，再回到同一个输入框，清空后粘贴新 Key，点「测试连接」和「保存」即可，不需要重装插件。点输入框右侧的「显示」可以核对当前填的是哪个 Key。
+
+**不想用 Key**：在「模型来源」切到 Claude Code / Codex / Antigravity 标签页，点「检测」，再点「设为默认来源」并保存，插件会直接调用你本机已登录的 CLI（前提是先在终端装好并登录）。Antigravity 还需要点一次「安装插件」。
+
+Key 只保存在本机 Zotero 的偏好设置（`prefs.js`）里，只会发给你选择的 DeepSeek API 地址。
 
 ## 功能详解
 
@@ -120,7 +138,7 @@ pi 本身只内置了 bash / 读写文件等「电脑操作」类工具（在 `p
 
 ## 安装与构建
 
-安装步骤见上文「快速开始」或[官网安装说明](https://coread.doosam.uk/#install)。从源码构建：`npm install && npm run build`，得到 `build/zotero-coread-ai-<version>.xpi`。
+安装步骤见上文「快速开始」，打包好的 `.xpi` 在 [Releases](https://github.com/sdyzjx/zotero-coread-ai/releases)。从源码构建：`npm install && npm run build`，得到 `build/zotero-coread-ai-<version>.xpi`。
 
 **预置 API Key（本地构建）**：复制 `.env.example` 为 `.env`（已在 `.gitignore` 中，不会提交）：
 
